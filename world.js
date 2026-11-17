@@ -632,7 +632,8 @@ function mapColumn(index,cx,cz,i,create=false) {
 }
 
 export class VoxelWorld {
-  constructor(scene) {
+  constructor(scene,budget={chunkRadius:7}) {
+    this.budget=budget;
     this.scene=scene;
     this.group=new THREE.Group(); this.group.name='Voxel world'; scene.add(this.group);
     this.regions=[]; this.regionIndex=new Map(); this.terrain=new Map(); this.passages=new Map();
@@ -864,7 +865,7 @@ export class VoxelWorld {
     for(const [x,z] of loaded){
       if(!this.dirty.has(key(x,z)))continue;
       this.makeChunk(x,z);
-      if(performance.now()-since>15){
+      if(performance.now()-since>(this.budget.chunkMillis??15)){
         await new Promise(resolve=>setTimeout(resolve,0));
         since=performance.now();
       }
@@ -1069,7 +1070,7 @@ export class VoxelWorld {
     const cx=Math.floor(playerPos.x/16), cz=Math.floor(playerPos.z/16), center=key(cx,cz);
     if(this.lastChunk!==center) {
       this.queue=[];
-      const radius=7;
+      const radius=this.budget.chunkRadius;
       for(let dz=-radius;dz<=radius;dz++) for(let dx=-radius;dx<=radius;dx++) {
         const dist=Math.hypot(dx,dz); if(dist>radius+.45) continue;
         const x=cx+dx,z=cz+dz,k=key(x,z);
@@ -1088,7 +1089,7 @@ export class VoxelWorld {
       }
       this.lastChunk=center;
     }
-    const start=performance.now(), budget=this.meshes.size<30?15:6;
+    const start=performance.now(), budget=this.budget.chunkMillis??(this.meshes.size<30?15:6);
     while(this.queue.length) {
       const next=this.queue.pop(); this.makeChunk(next.x,next.z);
       if(performance.now()-start>=budget) break;

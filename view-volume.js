@@ -2,8 +2,9 @@
 // projection is immutable. The cube lattice belongs to the world, never to
 // a camera or to a pair of successive images.
 import * as THREE from './vendor/three.module.js';
+import { desktopBudget } from './performance-profile.js';
 import { photoDistance } from './world.js';
-import { fuseAppearance } from './photo-fusion.js';
+import { fuseAppearance } from './photo-fusion.js?v=3.5';
 import { beginFusion } from './fusion-task.js';
 import { correspondence } from './morph.js';
 import { buildPhotoMotion, zeroMotionTexture, motionLimit, motionSite, viewerAffinity } from './photo-motion.js';
@@ -101,14 +102,14 @@ function canShare(a,b) {
   return !excludes(a,b)&&!excludes(b,a);
 }
 
-async function sourcePixels(profile) {
+async function sourcePixels(profile,maxSide) {
   const compact={width:profile.gridW,height:profile.gridH,data:profile.rgb,stride:3};
   if(typeof document==='undefined' || (!profile.imageBlob&&!profile.imageURL))return compact;
   let image=null,url=null;
   try{
     image=new Image();
     url=profile.imageBlob?URL.createObjectURL(profile.imageBlob):null;image.src=url||profile.imageURL;await image.decode();
-    const size=Math.min(1,1536/Math.max(image.naturalWidth,image.naturalHeight));
+    const size=Math.min(1,maxSide/Math.max(image.naturalWidth,image.naturalHeight));
     const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.naturalWidth*size));canvas.height=Math.max(1,Math.round(image.naturalHeight*size));
     const ctx=canvas.getContext('2d',{willReadFrequently:true,colorSpace:'srgb'});ctx.drawImage(image,0,0,canvas.width,canvas.height);
     return {width:canvas.width,height:canvas.height,data:ctx.getImageData(0,0,canvas.width,canvas.height).data,stride:4};
@@ -130,8 +131,9 @@ function textureOf(image){
 function makeRayGrid(r) {
   const s=r.s,maxSide=Math.round(116+54*(r.profile.detail??.55));
   // Oversample wide apertures to cover each unit cube even on distant layers.
-  const w=clamp(Math.max(maxSide*Math.min(1,s.aspect),Math.min(275,MAX_DEPTH*s.slopeX*1.18)),32,275)|0;
-  const h=clamp(Math.max(maxSide/Math.max(1,s.aspect),Math.min(225,MAX_DEPTH*s.slopeY*1.18)),32,225)|0;
+  const scale=r.budget?.rayScale??1;
+  const w=clamp(scale*Math.max(maxSide*Math.min(1,s.aspect),Math.min(275,MAX_DEPTH*s.slopeX*1.18)),32,275)|0;
+  const h=clamp(scale*Math.max(maxSide/Math.max(1,s.aspect),Math.min(225,MAX_DEPTH*s.slopeY*1.18)),32,225)|0;
   const neighbors=[r,...r.neighbors],maps=neighbors.map(()=>new Float32Array((w+1)*(h+1)*3));
   const depths=new Float32Array((w+1)*(h+1)),skies=new Uint8Array(depths.length),owned=new Uint8Array(depths.length);
   const probes=neighbors.map(()=>({u:0,v:0,d:0,inside:false,su:0,sv:0,w:0})),point={},mapped={},tuv={},rootUV={};
@@ -222,7 +224,16 @@ const vsCubes=transitionVertex+`
   varying vec3 worldP,centerP,norm;
   void main(){movement=startPigment.w;initialPigment=startPigment;
     centerP=mix(startCenter,cellCenter,eased(placement));
-    restPoint=centerP+position;worldP=restPoint+travel(cellCenter);norm=normal;
+    vec3 shift=travel(cellCenter);
+    vec3 corner=position;norm=normal;
+    #ifdef CAMERA_FACING_CUBE
+      // The three far faces of an opaque axis-aligned block are always
+      // back-facing. Reflect its three near faces into the camera octant.
+      vec3 signs=step(vec3(0.),cameraPosition-centerP-shift)*2.-1.;
+      if(signs.x*signs.y*signs.z<0.){corner=corner.zyx;norm=norm.zyx;}
+      corner*=signs;norm*=signs;
+    #endif
+    restPoint=centerP+corner;worldP=restPoint+shift;
     gl_Position=projectionMatrix*viewMatrix*vec4(worldP,1.);
   }`;
 const projectionGL=`
@@ -298,6 +309,13 @@ function stampUniforms(s){
 }
 function changeUniforms(l,s){const settings=stampUniforms(s);for(const k of Object.keys(settings))l.uniforms[k].value.copy(settings[k].value);}
 const box=new THREE.BoxGeometry(1,1,1);
+const facingBox=box.clone();
+const frontFaces=[];
+for(let i=0;i<box.index.count;i+=3){
+  const j=box.index.getX(i),n=box.attributes.normal;
+  if(n.getX(j)+n.getY(j)+n.getZ(j)>0)frontFaces.push(j,box.index.getX(i+1),box.index.getX(i+2));
+}
+facingBox.setIndex(frontFaces);
 const square=new THREE.PlaneGeometry(5,5);
 function instanced(base,attributes,count){
   const geometry=new THREE.InstancedBufferGeometry();
@@ -411,8 +429,9 @@ async function buildLayer(r,g,atlas,active,animate,image) {
   }
   const motion=buildPhotoMotion(r,g,back,rawDepth);
   const uniformsUv=uniforms(r,tex,motion);uniformsUv.placement.value=animate?0:1;
-  const solid=new THREE.Mesh(instanced(box,{cellCenter:coords,startCenter:starts,startPigment:pigments},cells.size),
-    new THREE.ShaderMaterial({uniforms:uniformsUv,vertexShader:vsCubes,fragmentShader:fsCubes,toneMapped:false,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
+  const compact=r.budget.rayScale<1;
+  const solid=new THREE.Mesh(instanced(compact?facingBox:box,{cellCenter:coords,startCenter:starts,startPigment:pigments},cells.size),
+    new THREE.ShaderMaterial({defines:compact?{CAMERA_FACING_CUBE:1}:{},uniforms:uniformsUv,vertexShader:vsCubes,fragmentShader:fsCubes,toneMapped:false,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
   solid.userData.worldAxisCubes=true;solid.userData.stampId=r.id;solid.name='World-axis photo voxels';solid.frustumCulled=false;
   const gaussian=new THREE.Mesh(instanced(square,{surfacePoint:surfels,tangentU:tangents,tangentV:bitangents,startCenter:splatStarts,startPigment:splatPigments},surfels.length/3),
     new THREE.ShaderMaterial({uniforms:uniformsUv,vertexShader:vsSurfels,fragmentShader:fsSurfels,transparent:true,depthTest:true,depthWrite:false,side:THREE.DoubleSide,forceSinglePass:true,toneMapped:false}));
@@ -454,7 +473,8 @@ function retainGpu(layer,lod){
   layer.resident=true;layer.lod=lod;
 }
 export class ViewVolumeAtlas {
-  constructor(){
+  constructor(budget=desktopBudget){
+    this.budget=budget;
     this.mesh=new THREE.Group();this.mesh.name='World-space photo stamps';this.stamps=[];this.records=this.stamps;
     this.masked=new Set();this.cells=new Map();this.sections=new Map();this.lastSection=null;this.lastKey='';
     this.query={};this.transitionProgress=1;this.animating=false;this.retiring=[];this.transitionLayers=[];this.lastPlacement=null;
@@ -463,13 +483,13 @@ export class ViewVolumeAtlas {
   }
   async pixelsFor(profile){
     const key=profile.imageBlob||profile.imageURL;
-    if(!key)return sourcePixels(profile);
+    if(!key)return sourcePixels(profile,this.budget.sourceSide);
     const hit=this.sourceImages.get(key);
     if(hit){this.sourceImages.delete(key);this.sourceImages.set(key,hit);return hit;}
-    const pixels=await sourcePixels(profile);
+    const pixels=await sourcePixels(profile,this.budget.sourceSide);
     if(pixels.stride!==4)return pixels;
     this.sourceImages.set(key,pixels);this.sourceBytes+=pixels.data.byteLength;
-    while(this.sourceBytes>36*1024*1024){
+    while(this.sourceBytes>this.budget.cacheBytes){
       const oldest=this.sourceImages.keys().next().value;
       this.sourceBytes-=this.sourceImages.get(oldest).data.byteLength;this.sourceImages.delete(oldest);
     }
@@ -480,17 +500,17 @@ export class ViewVolumeAtlas {
     const append=()=>this.addOne(profile,stamp,id,options);
     const result=this.pending.then(append);this.pending=result.catch(()=>{});return result;
   }
-  async addOne(profile,stamp,id,options){
-    const animate=options.animate!==false,prepare=animate||options.prepareReplay===true;
+  prepareRecord(profile,stamp,id,previous){
     if(this.closed)throw Error('The photo atlas is closed.');
-    const s=cameraStamp(stamp),index=id??(this.stamps.length?this.stamps.at(-1).id+1:0);
-    if(this.stamps.some(r=>r.id===index))throw Error('This photo already has a stamp.');
+    const s=cameraStamp(stamp),index=id??(previous.length?previous.at(-1).id+1:0);
+    if(previous.some(r=>r.id===index))throw Error('This photo already has a stamp.');
     if(![s.x,s.y,s.z,s.slopeX,s.slopeY,s.near,s.far].every(Number.isFinite)||s.slopeX<=0||s.slopeY<=0||s.far<=s.near)
       throw Error('Invalid photo capture projection.');
     const aspect=profile.width/profile.height||profile.gridW/profile.gridH;
-    const r={s,id:index,profile,source:await this.pixelsFor(profile),cropX:Math.min(1,s.aspect/aspect),cropY:Math.min(1,aspect/s.aspect),
+    const r={s,id:index,profile,budget:this.budget,source:null,cropX:Math.min(1,s.aspect/aspect),cropY:Math.min(1,aspect/s.aspect),
       neighbors:[],flows:new Map(),bounds:stampBounds(s,MAX_DEPTH+3),layer:null};
-    const neighbors=this.stamps.filter(other=>canShare(r,other));
+    const neighbors=previous.filter(other=>canShare(r,other));
+    r.neighbors=neighbors;
     // Photos from an identical camera share one geometric sampling grid.
     // Every exposure still influences its radiance and reconstructed depth.
     const cameraKeys=['x','y','z','dx','dy','dz','rx','ry','rz','ux','uy','uz','slopeX','slopeY','offsetX','offsetY','near','far'];
@@ -503,29 +523,64 @@ export class ViewVolumeAtlas {
     if(closest && similarity(closest)>.15){
       r.flows.set(closest.id,correspondence(profile,closest.profile,25,19));
     }
-    const pending=[];let workerTask=null,observers;
+    if(r.flows.size)closest.flows.set(r.id,correspondence(closest.profile,profile,25,19));
+    for(const old of neighbors)old.neighbors.push(r);
+    return r;
+  }
+  async fuseLayers(records,active,animate,accept){
+    if(!records.length)return;
+    const observers=new Set(records.flatMap(r=>[r,...r.neighbors]));
+    let task;
     try{
-      for(const old of neighbors){old.neighbors.push(r);r.neighbors.push(old);}
-      if(r.flows.size)closest.flows.set(r.id,correspondence(closest.profile,profile,25,19));
-      observers=new Set([r,...neighbors.flatMap(q=>[q,...q.neighbors])]);
-      for(const record of observers)record.source??=await this.pixelsFor(record.profile);
-      workerTask=beginFusion(observers,computePhotoSamples);
-      for(const record of [...neighbors,r]){
+      for(const r of observers)r.source=await this.pixelsFor(r.profile);
+      task=beginFusion(observers,computePhotoSamples);
+      for(const r of records){
+        if(this.closed)throw Error('The photo atlas is closed.');
         if(typeof window!=='undefined')await new Promise(resolve=>setTimeout(resolve,0));
-        if(record.representative&&record.layer)continue;
-        const {grid,image}=record.representative
+        if(r.representative&&r.layer)continue;
+        const {grid,image}=r.representative
           ?{grid:{w:0,h:0,depths:new Float32Array(1)},image:{width:1,height:1,stride:4,data:new Uint8Array(4)}}
-          :await workerTask.sample(record);
-        pending.push([record,await buildLayer(record,grid,this,r,prepare,image)]);
+          :await task.sample(r);
+        accept(r,await buildLayer(r,grid,this,active||r,animate,image));
       }
+    }finally{
+      task?.close();
+      for(const r of observers)r.source=null;
+    }
+  }
+  // A cold restore has no player watching the intermediate insertions. Build
+  // its overlap graph first and fuse each saved viewpoint directly against its
+  // final neighbors. Small batches bound decoded pixels for long, sparse walks.
+  async restore(entries) {
+    if(this.stamps.length)throw Error('The photo atlas already contains views.');
+    const records=[];
+    for(const {profile,frame,id} of entries){
+      const r=this.prepareRecord(profile,frame,id,records);records.push(r);
+    }
+    try{
+      for(let i=0;i<records.length;i+=4){
+        await this.fuseLayers(records.slice(i,i+4),null,false,(r,layer)=>{r.layer=layer;});
+      }
+      if(this.closed)throw Error('The photo atlas is closed.');
+    }catch(error){for(const r of records)r.layer?.dispose();throw error;}
+    for(const r of records){
+      r.motionSite=motionSite(r);this.stamps.push(r);this.indexRecord(r);this.mesh.add(r.layer.root);
+      for(const [k,c] of r.layer.cells)if(c.id)this.cells.set(k,c);
+    }
+    if(records.length)this.lastBounds=records.at(-1).bounds;
+    this.update(this.camera,this.mode,this.splats,0);
+  }
+  async addOne(profile,stamp,id,options){
+    const animate=options.animate!==false,prepare=animate||options.prepareReplay===true;
+    const r=this.prepareRecord(profile,stamp,id,this.stamps),neighbors=r.neighbors;
+    const pending=[];
+    try{
+      await this.fuseLayers([...neighbors,r],r,prepare,(record,layer)=>pending.push([record,layer]));
       if(this.closed)throw Error('The photo atlas is closed.');
     }catch(error){
       for(const [_,layer] of pending)layer.dispose();
       for(const old of neighbors){old.neighbors=old.neighbors.filter(q=>q!==r);old.flows.delete(r.id);}
       throw error;
-    }finally{
-      workerTask?.close();
-      if(observers)for(const record of observers)record.source=null;
     }
     this.finishTransition();
     for(const [record,layer] of pending){
@@ -677,7 +732,7 @@ export class ViewVolumeAtlas {
     // Every visible contributor remains represented, including arbitrarily
     // old ones. Far layers share a six-megapixel radiance working set.
     for(const {l,native,importance} of visible){
-      const target=Math.max(16,importance*Math.min(1,6291456/Math.max(1,budget)));
+      const target=Math.max(16,importance*Math.min(1,this.budget.visibleTexels/Math.max(1,budget)));
       const lod=Math.max(0,Math.ceil(Math.log2(native/target)*.5-.22));
       retainGpu(l,lod);l.root.visible=true;
       if(c&&l.motion){l.motion.update(c.position);l.uniforms.observerEye.value.copy(c.position);}

@@ -31,7 +31,7 @@ function readBand(level,u,v,out,offset){
 // Resample the source UV maps with premultiplied confidence. A missing corner
 // of a clipped capture must not pull another photograph's UV toward (0,0).
 export function fuseAppearance(record,grid){
-  const size=Math.min(1410,Math.max(320,Math.round(Math.max(record.source.width*record.cropX,record.source.height*record.cropY))));
+  const size=Math.min(record.budget?.textureSide??1410,Math.max(320,Math.round(Math.max(record.source.width*record.cropX,record.source.height*record.cropY))));
   const width=Math.max(1,Math.round(size*Math.min(1,record.s.aspect))),height=Math.max(1,Math.round(size/Math.max(1,record.s.aspect)));
   const data=new Uint8Array(width*height*4), row=grid.w+1, row3=row*3;
   const xs=Float32Array.from({length:width},(_,i)=>(i+.5)*grid.w/width);

@@ -1,8 +1,17 @@
 import * as THREE from './vendor/three.module.js';
 import { photoDistance } from './world.js';
+import { isMobileRenderer } from './performance-profile.js';
 
 const sharedCube=new THREE.BoxGeometry(1,1,1);
-const previews=new WeakMap();
+const mobile=isMobileRenderer(),previews=new Map();
+function trimPreviews(keep){
+  const limit=mobile?3:6;
+  for(const [profile,entry] of previews){
+    if(previews.size<=limit)break;
+    if(entry.users||profile===keep)continue;
+    entry.geometry.dispose();previews.delete(profile);
+  }
+}
 const vertexShader=`
 attribute vec3 photoSample;
 attribute vec3 pigment;
@@ -30,8 +39,12 @@ void main() {
 // One small, pose-independent GPU geometry per prepared source. Repeated taps
 // only set camera uniforms; source decoding and neural inference stay off the tap path.
 export function prepareBankPreview(profile) {
-  if(previews.has(profile))return previews.get(profile);
-  const scale=Math.min(1,156/Math.max(profile.gridW,profile.gridH));
+  const cached=previews.get(profile);
+  if(cached){
+    previews.delete(profile);previews.set(profile,cached);
+    return cached.geometry;
+  }
+  const scale=Math.min(1,(mobile?76:156)/Math.max(profile.gridW,profile.gridH));
   const w=Math.max(1,Math.round(profile.gridW*scale)),h=Math.max(1,Math.round(profile.gridH*scale));
   const samples=new Float32Array(w*h*3),colors=new Uint8Array(w*h*3);
   for(let y=0;y<h;y++)for(let x=0;x<w;x++){
@@ -41,13 +54,16 @@ export function prepareBankPreview(profile) {
     colors[i]=profile.rgb[k*3];colors[i+1]=profile.rgb[k*3+1];colors[i+2]=profile.rgb[k*3+2];
   }
   const geometry=new THREE.InstancedBufferGeometry();
-  geometry.setIndex(sharedCube.index);
-  geometry.setAttribute('position',sharedCube.attributes.position);
-  geometry.setAttribute('normal',sharedCube.attributes.normal);
+  geometry.setIndex(sharedCube.index.clone());
+  geometry.setAttribute('position',sharedCube.attributes.position.clone());
+  geometry.setAttribute('normal',sharedCube.attributes.normal.clone());
   geometry.setAttribute('photoSample',new THREE.InstancedBufferAttribute(samples,3));
   geometry.setAttribute('pigment',new THREE.InstancedBufferAttribute(colors,3,true));
   geometry.instanceCount=w*h;
-  previews.set(profile,geometry);
+  previews.set(profile,{geometry,users:0});
+  // An in-flight mesh holds its entry until both preview passes have faded.
+  // Keep the newly prepared entry while older busy previews finish.
+  trimPreviews(profile);
   return geometry;
 }
 
@@ -63,6 +79,7 @@ export function showBankPreview(game,profile,s) {
       depthRange:{value:new THREE.Vector2(s.near,s.far)}
     }});
   const mesh=new THREE.Mesh(prepareBankPreview(profile),material);
+  const entry=previews.get(profile);entry.users++;
   mesh.name='Incoming photo voxels';mesh.frustumCulled=false;mesh.renderOrder=25;
   // A second, lighter pass reveals the parts which will replace an older,
   // nearer shell. Both passes still follow the stored 3D capture as you move.
@@ -74,6 +91,7 @@ export function showBankPreview(game,profile,s) {
   function remove(){
     mesh.removeFromParent();behind.removeFromParent();
     material.dispose();behindMaterial.dispose();game.drawRequested=true;
+    entry.users--;trimPreviews();
   }
   return {remove,finish(){
     // The atlas begins advancing its transition after the terrain refresh.
