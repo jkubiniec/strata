@@ -1,4 +1,4 @@
-import { computePhotoSamples } from './view-volume.js';
+import { computePhotoSamples } from './view-volume.js?v=3.5';
 
 let records;
 self.onmessage=({data})=>{

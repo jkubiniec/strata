@@ -1,4 +1,5 @@
 import { refineryFeatures } from './photo-assets.js';
+import { isMobileRenderer } from './performance-profile.js';
 const clamp = (value, low = 0, high = 1) => Math.min(high, Math.max(low, value));
 const detectorSize = 416;
 let detectorWorker;
@@ -49,6 +50,7 @@ export async function detectObjects(image, width = image.naturalWidth || image.w
   ctx.fillRect(x, y, w, h);
   ctx.drawImage(image, x, y, w, h);
   const rgba = ctx.getImageData(0, 0, detectorSize, detectorSize).data;
+  ctx.canvas.width = ctx.canvas.height = 1;
   const worker = workerForDetection();
   const id = ++inferenceId;
   let watchdog;
@@ -75,6 +77,7 @@ function sampleImage(image, w, h) {
   ctx.fillRect(0, 0, w, h);
   ctx.drawImage(image, 0, 0, w, h);
   const rgba = ctx.getImageData(0, 0, w, h).data;
+  ctx.canvas.width = ctx.canvas.height = 1;
   const n = w * h;
   const rgb = new Uint8Array(n * 3), luma = new Float32Array(n), edge = new Float32Array(n);
   let seed = 2166136261, greenery = 0, gray = 0;
@@ -345,7 +348,7 @@ async function runDepthModel(image, width, height, onProgress) {
   if (typeof WebAssembly === 'undefined') throw new Error('WebAssembly unavailable');
   if (width < 2 || height < 2) throw new Error('A single pixel row or column has no two-dimensional structure');
   const memory = navigator.deviceMemory || (navigator.hardwareConcurrency <= 4 || matchMedia('(pointer: coarse)').matches ? 4 : 6);
-  const maxSide = memory <= 2 ? 224 : memory <= 4 ? 308 : width * height >= 4000000 ? 448 : 392;
+  const maxSide = isMobileRenderer() || memory <= 2 ? 224 : memory <= 4 ? 308 : width * height >= 4000000 ? 448 : 392;
   const scale = maxSide / Math.max(width, height);
   const w = Math.max(56, Math.round(width * scale / 14) * 14);
   const h = Math.max(56, Math.round(height * scale / 14) * 14);
@@ -366,6 +369,7 @@ async function runDepthModel(image, width, height, onProgress) {
   }
   ctx.drawImage(image, left, top, cw, ch);
   const rgba = ctx.getImageData(0, 0, w, h).data;
+  ctx.canvas.width = ctx.canvas.height = 1;
   const worker = new Worker(new URL('./vendor/vision/depth.js', import.meta.url), { type: 'module' });
   let timer;
   try {
@@ -416,21 +420,22 @@ function applyMonocularDepth(depth, sky, w, h, map) {
   }
 }
 
-export async function analyzeImage(image, { starter = false, onProgress } = {}) {
-  const width = image.naturalWidth || image.width, height = image.naturalHeight || image.height;
+export async function analyzeImage(image, { starter = false, onProgress, originalWidth, originalHeight } = {}) {
+  const inputWidth = image.naturalWidth || image.width, inputHeight = image.naturalHeight || image.height;
+  const width = originalWidth || inputWidth, height = originalHeight || inputHeight;
   if (!(width > 0 && height > 0)) throw new Error('The photo has no readable pixels.');
   onProgress?.(starter ? 'Reading the refinery photo study' : 'Reading objects with Tiny YOLOv3');
   let stored;
   if (starter && width === 6000 && height === 4000) {
     try { stored = await storedStarterAnalysis(); } catch { /* Recompute if cached assets are unavailable. */ }
   }
-  const objectTask = stored ? Promise.resolve(stored) : detectObjects(image, width, height);
+  const objectTask = stored ? Promise.resolve(stored) : detectObjects(image, inputWidth, inputHeight);
   const learned = objectTask.then(result => ({ ...result, available: true }), error => {
     console.warn('Using local image analysis without object detections.', error.message);
     return { detections: [], available: false };
   });
   const long = Math.max(width, height);
-  const target = Math.min(long, 600, Math.round(42 + 6.45 * Math.sqrt(long)));
+  const target = Math.min(long, isMobileRenderer() ? 320 : 600, Math.round(42 + 6.45 * Math.sqrt(long)));
   const gridW = Math.max(1, Math.round(width * target / long)), gridH = Math.max(1, Math.round(height * target / long));
   const detail = clamp(Math.log2(1 + Math.sqrt(width * height) / 96) / 5.75);
   const signals = sampleImage(image, gridW, gridH);
@@ -441,7 +446,7 @@ export async function analyzeImage(image, { starter = false, onProgress } = {}) 
   if (kind === 'interior' || (kind === 'object' && (sky.blue < 0.1 || sky.fraction > 0.53))) { sky.mask.fill(0); sky.horizon = 0.46; }
   onProgress?.(stored ? 'Placing photo surfaces' : 'Loading the local depth model');
   await new Promise(resolve => setTimeout(resolve, 0));
-  const modelDepth = stored ? Promise.resolve(stored.depth) : runDepthModel(image, width, height, onProgress).catch(error => {
+  const modelDepth = stored ? Promise.resolve(stored.depth) : runDepthModel(image, inputWidth, inputHeight, onProgress).catch(error => {
     console.warn('Using color and edge depth cues.', error.message);
     return undefined;
   });

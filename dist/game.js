@@ -1,4 +1,5 @@
 import * as THREE from './vendor/three.module.js';
+import { AdaptiveRaster, desktopBudget, isMobileRenderer, phoneBudget } from './performance-profile.js';
 import { correspondence, createMorphField, MorphEditVolume } from './morph.js';
 import { createPhotoSurface } from './reconstruction.js';
 import { ViewVolumeAtlas, cameraStamp, captureStamp } from './view-volume.js';
@@ -233,8 +234,8 @@ const splatFragment = `
   }
 `;
 
-function registerSurface(world, anchor, eyeY, aspect, sensorSlope) {
-  const cols = 51, rows = 35;
+function registerSurface(world, anchor, eyeY, aspect, sensorSlope, compact) {
+  const cols = compact?31:51, rows = compact?23:35;
   const distance = new Float32Array(cols * rows);
   const tint = new Uint32Array(cols * rows);
   for (let j = 0; j < rows; j++) {
@@ -251,14 +252,14 @@ function registerSurface(world, anchor, eyeY, aspect, sensorSlope) {
   return { distance, tint, index: (u,v) => Math.round(v*(rows-1))*cols+Math.round(u*(cols-1)) };
 }
 
-function makeSplatField(world, profile, anchor, starter, viewport, fogColor) {
+function makeSplatField(world, profile, anchor, starter, viewport, fogColor, compact=false) {
   const gw = profile.gridW, gh = profile.gridH;
   const aspect = profile.width / profile.height || gw / gh;
   const sensorSlope = photoVerticalSlope(aspect) / 2;
-  const w = Math.min(gw, Math.round(130 + 211 * (profile.detail ?? .6)));
+  const w = Math.min(gw, Math.round((compact?70:130) + (compact?63:211) * (profile.detail ?? .6)));
   const h = Math.min(gh, Math.max(1, Math.round(w * gh / gw)));
   const eyeY = world.getGround(anchor.x, anchor.z) + eyeHeight;
-  const surface = registerSurface(world, anchor, eyeY, aspect, sensorSlope);
+  const surface = registerSurface(world, anchor, eyeY, aspect, sensorSlope, compact);
   const depths = new Float32Array(w * h);
   const attached = new Float32Array(w * h);
   const pixels = new Int32Array(w * h);
@@ -329,7 +330,7 @@ function makeSplatField(world, profile, anchor, starter, viewport, fogColor) {
   // photo, so the Gaussian-only view has a walkable, colored world outside
   // the source image's field of view. These surfels use voxel surface colors,
   // with the same world-space covariance and depth sorting as photo samples.
-  const tile = 1.95;
+  const tile = compact?3:1.95;
   const support = (u,v,y,col,normal,opacity) => {
     const x = anchor.x - anchor.dz*u + anchor.dx*v, z = anchor.z + anchor.dx*u + anchor.dz*v;
     if (v>1) {
@@ -482,9 +483,12 @@ export class Game {
   constructor(canvas, callbacks = {}) {
     this.canvas = canvas;
     this.callbacks = callbacks;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
+    this.mobile = isMobileRenderer();
+    this.budget = this.mobile?phoneBudget:desktopBudget;
+    this.raster = new AdaptiveRaster();
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !this.mobile, alpha: false, powerPreference: 'high-performance' });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.enabled = !this.mobile;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.shadowMap.autoUpdate = false;
     this.renderer.shadowMap.needsUpdate = true;
@@ -498,10 +502,10 @@ export class Game {
     this.voxels = new THREE.Group();
     this.voxels.name = 'Editable voxel world';
     this.scene.add(this.sky, this.clouds, this.voxels);
-    this.world = new VoxelWorld(this.voxels);
+    this.world = new VoxelWorld(this.voxels,this.budget);
     const ambient = new THREE.HemisphereLight('#e5eff8', '#ac9975', 1.25);
     this.sun = new THREE.DirectionalLight('#ffebcc', 2.28);
-    this.sun.castShadow = true;
+    this.sun.castShadow = !this.mobile;
     this.sun.shadow.mapSize.set(2048, 2048);
     const shadowCamera = this.sun.shadow.camera;
     Object.assign(shadowCamera, { left: -68, right: 68, top: 63, bottom: -63, near: 1, far: 234 });
@@ -531,7 +535,7 @@ export class Game {
     this.keys = new Set();
     this.regions = [];
     this.stamps=[];
-    this.viewAtlas=new ViewVolumeAtlas();
+    this.viewAtlas=new ViewVolumeAtlas(this.budget);
     this.scene.add(this.viewAtlas.mesh);
     this.viewAtlas.mesh.visible=false;
     this.stampClip=new StampClip();
@@ -589,13 +593,12 @@ export class Game {
   resize() {
     const width = Math.max(1, this.canvas.clientWidth || 1);
     const height = Math.max(1, this.canvas.clientHeight || 1);
-    const scale = Math.min(window.devicePixelRatio || 1, 1.65, Math.sqrt(2700000 / (width*height)));
+    const scale = Math.min(window.devicePixelRatio || 1, this.budget.pixelRatio, Math.sqrt(this.budget.rasterPixels / (width*height)))*this.raster.scale;
     if (this.drawSize[0] === width && this.drawSize[1] === height && this.drawSize[2] === scale) return;
-    this.recalledAspect=null;
+    if(this.drawSize[0]!==width||this.drawSize[1]!==height)this.recalledAspect=null;
     this.drawSize = [width, height, scale];
     this.drawRequested = true;
-    this.renderer.setPixelRatio(scale);
-    this.renderer.setSize(width, height, false);
+    this.renderer.setDrawingBufferSize(width,height,scale);
     this.renderer.getDrawingBufferSize(this.viewport);
     this.updateViewport();
     this.updateLens();
@@ -731,34 +734,74 @@ export class Game {
     if(![eye.x,eye.y,eye.z,frame.fov,frame.aspect,frame.near,frame.far].every(Number.isFinite)
       ||frame.slopeX<=0||frame.slopeY<=0||frame.near<=0||frame.far<=frame.near)
       return Promise.reject(new Error('The photograph needs a valid camera view.'));
+    if(this.restoringViews){
+      const id=this.restoringViews.length;
+      this.restoringViews.push({profile,frame,id,options});
+      return Promise.resolve(id);
+    }
     const run=this.queue.then(async()=>{
       const index=this.stamps.length;
       await this.viewAtlas.add(profile,frame,index,options);
-      const bounds={...this.viewAtlas.lastBounds};
-      this.stamps.push({profile,capture:frame,bounds});
-      if(!this.liveViews) {
-        this.liveLens=this.camera.fov;
-        this.liveViews=true;this.guidedEdge=null;this.photoSlopes=null;
-        if(this.liveField)this.liveField.mesh.visible=false;
-        this.stampClip.apply(this.world.trimMaterial);
-        for(const r of this.regions){
-          this.stampClip.apply(r.field.mesh.material);
-          this.stampClip.apply(r.surface.mesh.children[0].material);
-        }
-      }
-      this.world.registerView(this.viewAtlas,bounds);
-      this.stampClip.add(frame);
-      for(const [x,y,z] of this.edits.values())this.viewAtlas.maskCell(x,y,z);
-      this.placingView=true;
-      try {await this.world.refreshView(bounds);}
-      finally {this.placingView=false;}
-      this.viewAtlas.mesh.visible=this.liveViews;
-      this.drawRequested=true;this.renderer.shadowMap.needsUpdate=true;
-      this.updateAtmosphere(0);this.emitStats();
+      const bounds=this.viewAtlas.lastBounds;
+      this.registerPhoto(profile,frame,bounds);
+      await this.finishPhotoChanges(bounds);
       return index;
     });
     this.queue=run.catch(()=>{});
     return run;
+  }
+
+  registerPhoto(profile,frame,bounds){
+    this.stamps.push({profile,capture:frame,bounds});
+    if(!this.liveViews) {
+      this.liveLens=this.camera.fov;
+      this.liveViews=true;this.guidedEdge=null;this.photoSlopes=null;
+      if(this.liveField)this.liveField.mesh.visible=false;
+      this.stampClip.apply(this.world.trimMaterial);
+      for(const r of this.regions){
+        this.stampClip.apply(r.field.mesh.material);
+        this.stampClip.apply(r.surface.mesh.children[0].material);
+      }
+    }
+    this.world.registerView(this.viewAtlas,bounds);
+    this.stampClip.add(frame);
+  }
+
+  async finishPhotoChanges(bounds){
+    for(const [x,y,z] of this.edits.values())this.viewAtlas.maskCell(x,y,z);
+    this.placingView=true;
+    try{await this.world.refreshView(bounds);}
+    finally{this.placingView=false;}
+    this.viewAtlas.mesh.visible=this.liveViews;
+    this.drawRequested=true;this.renderer.shadowMap.needsUpdate=true;
+    this.updateAtmosphere(0);this.emitStats();
+  }
+
+  beginViewRestore(){
+    if(!this.stamps.length)this.restoringViews=[];
+  }
+
+  async finishViewRestore(){
+    const entries=this.restoringViews;
+    this.restoringViews=null;
+    if(!entries?.length)return;
+    const last=entries.at(-1);
+    // Keep the final insertion on the ordinary path if it needs the
+    // previous geometry for a replay or live placement animation.
+    const replay=last.options.animate!==false||last.options.prepareReplay;
+    const initial=replay?entries.slice(0,-1):entries;
+    if(initial.length){
+      await this.viewAtlas.restore(initial);
+      const bounds={...this.viewAtlas.stamps[0].bounds};
+      for(const {id,profile,frame} of initial){
+        const extent=this.viewAtlas.stamps[id].bounds;
+        this.registerPhoto(profile,frame,extent);
+        for(const side of ['minX','minY','minZ'])bounds[side]=Math.min(bounds[side],extent[side]);
+        for(const side of ['maxX','maxY','maxZ'])bounds[side]=Math.max(bounds[side],extent[side]);
+      }
+      await this.finishPhotoChanges(bounds);
+    }
+    if(replay)await this.addViewPhoto(last.profile,last.frame,last.options);
   }
 
   get canReplayPlacement() {return this.liveViews&&this.viewAtlas.canReplayPlacement;}
@@ -813,7 +856,7 @@ export class Game {
       }
       const sky = skyColors(profile, starter);
       const surface=await createPhotoSurface(profile,anchor,this.world.getGround(anchor.x,anchor.z)+eyeHeight,this.world,false);
-      const field = makeSplatField(this.world, profile, anchor, starter, this.viewport, this.scene.fog.color);
+      const field = makeSplatField(this.world, profile, anchor, starter, this.viewport, this.scene.fog.color,this.mobile);
       for (const [x,y,z] of this.edits.values()) {field.maskCell(x,y,z);surface.maskCell(x,y,z);}
       this.scene.add(field.mesh,surface.mesh);
       if(this.liveViews){
@@ -1388,6 +1431,7 @@ export class Game {
     this.lastDraw = now;
     const dt = clamp(elapsed,0,.06);
     if (!idle && elapsed > 0 && elapsed < 1) this.fps = THREE.MathUtils.lerp(this.fps, 1/elapsed, .055);
+    if(this.mobile&&this.playing&&this.raster.observe(elapsed))this.resize();
     if (this.regions.length) {
       if (this.playing) this.simulate(dt);
       this.updateFragments(dt);

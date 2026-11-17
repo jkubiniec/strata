@@ -38,7 +38,7 @@ export function viewerAffinity(eye,site){
 
 export function buildPhotoMotion(record,grid,back,rawDepth){
   if(!grid.neighbors||grid.neighbors.length<2||!grid.w||!grid.h)return null;
-  const width=Math.min(51,grid.w+1),height=Math.min(Math.max(15,Math.round(width/record.s.aspect)),45,grid.h+1);
+  const width=Math.min(record.budget?.motionWidth??51,grid.w+1),height=Math.min(Math.max(15,Math.round(width/record.s.aspect)),record.budget?.motionHeight??45,grid.h+1);
   const count=width*height,n=grid.neighbors.length;
   const neighbors=grid.neighbors;
   // One row of observations per texel: confidence, XYZ endpoint relative to the

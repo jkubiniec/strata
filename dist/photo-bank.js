@@ -10,6 +10,38 @@ export function nextReady(items,lastId) {
   return null;
 }
 
+const rad=Math.PI/180;
+const cosAngle=(a,b)=>Math.sin(a.pitch)*Math.sin(b.pitch)+Math.cos(a.pitch)*Math.cos(b.pitch)*Math.cos(a.yaw-b.yaw);
+const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);
+
+// Compare viewing directions on the sphere so north crossings and looking
+// almost straight up don't create artificial turn events.
+export function sameAutoView(a,b) {
+  return distance(a,b)<3 && cosAngle(a,b)>Math.cos(8*rad);
+}
+
+export class WalkingPlacement {
+  reset(pose) {
+    this.anchor=this.previous=pose;
+    this.lastPlacement=-Infinity;
+  }
+
+  placed(pose,now) {
+    this.anchor=this.previous=pose;
+    this.lastPlacement=now;
+  }
+
+  update(pose,now,available) {
+    if(!this.previous){this.reset(pose);return false;}
+    const moved=distance(this.previous,pose)>.015 || cosAngle(this.previous,pose)<Math.cos(.12*rad);
+    this.previous=pose;
+    if(!available||!moved||now-this.lastPlacement<2400)return false;
+    if(distance(this.anchor,pose)<12 && cosAngle(this.anchor,pose)>Math.cos(35*rad))return false;
+    this.placed(pose,now);
+    return true;
+  }
+}
+
 export class PhotoBank {
   constructor(prepare,changed,storageWarning) {
     this.prepare=prepare;
@@ -18,6 +50,7 @@ export class PhotoBank {
     this.items=[];
     this.byId=new Map();
     this.lastId=null;
+    this.automatic=true;
     this.preparing=false;
     this.saving=true;
   }
@@ -25,16 +58,23 @@ export class PhotoBank {
   async open() {
     try{
       this.db=await openDatabase('strata-source-bank-v1');
-      const [items,lastId]=await Promise.all([
-        readStore(this.db,'regions'),readStore(this.db,'settings','lastId')
+      const [items,lastId,automatic]=await Promise.all([
+        readStore(this.db,'regions'),readStore(this.db,'settings','lastId'),readStore(this.db,'settings','automatic')
       ]);
       items.sort((a,b)=>a.order-b.order||a.id.localeCompare(b.id));
       this.items=items;
       this.byId=new Map(items.map(item=>[item.id,item]));
       this.lastId=lastId??null;
+      this.automatic=automatic!==false;
     }catch{this.warnStorage();}
     this.changed();
     this.preparePending();
+  }
+
+  setAutomatic(enabled) {
+    this.automatic=enabled;
+    this.save('settings',enabled,'automatic');
+    this.changed();
   }
 
   warnStorage() {

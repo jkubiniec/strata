@@ -1,0 +1,46 @@
+Strata uses libheif-js 1.23.5 for optional, on-device HEIC still-image decoding.
+The game first uses the browser's image decoder. If it cannot open a HEIF
+photograph, the game loads the unmodified WebAssembly/JavaScript bundle in a
+dedicated worker. The game disposes of the worker after that photograph.
+
+libheif-bundle.js is the unmodified libheif-wasm/libheif-bundle.js file from
+the libheif-js 1.23.5 npm distribution. SHA-256:
+074b2b55ef3de477ba9f794ca381f3f0324c1cba8c91b4af07395f39c22d54cc
+
+Copyright belongs to the upstream authors and contributors. The JS package is
+licensed under LGPL-3.0 (LICENSE-package.txt). The WebAssembly build includes
+libheif and libde265, which carry their own copyright and license notices.
+LICENSE-libheif.txt and LICENSE-libde265.txt include the LGPL, GPL and the
+upstream MIT notices for ancillary code. Original source-file notices are in
+the source archive.
+
+Corresponding source and build instructions
+
+The accompanying corresponding-source.zip is available from this same directory:
+https://jkubiniec.github.io/strata/vendor/heif/corresponding-source.zip
+
+It contains the following four upstream source trees and their build recipes:
+* libheif, commit 413e2a87e6a70b3eccc3a3adc5801179dd2d9e00
+  https://github.com/strukturag/libheif/tree/413e2a87e6a70b3eccc3a3adc5801179dd2d9e00
+* libde265 1.0.15, the upstream source tarball selected by build-emscripten.sh
+  https://github.com/strukturag/libde265/releases/tag/v1.0.15
+* libheif-emscripten v1.23.5, commit 5c8968a44e9c68ae677e24790d77d001ed7fe7cc
+  https://github.com/catdad-experiments/libheif-emscripten/tree/5c8968a44e9c68ae677e24790d77d001ed7fe7cc
+* libheif-js 1.23.5, commit d8ec4bc3bc5bf8055975577bccbbc7e1d7313c2d
+  https://github.com/catdad-experiments/libheif-js/tree/d8ec4bc3bc5bf8055975577bccbbc7e1d7313c2d
+
+To rebuild, extract the four archives, populate the libheif-emscripten/libheif
+submodule directory with the libheif tree, and follow its
+.github/workflows/emscripten.yml WASM build with Emscripten 3.1.61. The
+libheif/build-emscripten.sh script names its libde265 source tarball and build
+options. Package the outputs as shown in the release job. In the libheif-js
+tree, install its declared development dependencies, then run
+node scripts/install.js /path/to/libheif.tar.gz to recreate the JS bundle.
+
+Using a modified library
+
+Replace vendor/heif/libheif-bundle.js in a local or hosted copy of Strata with
+a compatible build. Reload the page. The worker loads the replacement from
+this path, without any signature check or modification to the rest of the
+game. You may modify the library and debug your modifications, including
+reverse engineering for that purpose, under the applicable LGPL terms.

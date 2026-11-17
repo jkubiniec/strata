@@ -1,6 +1,6 @@
 # Strata
 
-[Play Strata](https://jkubiniec.github.io/strata/) · [Try the reversible morph](https://jkubiniec.github.io/strata/?demo=walk&complete=1&overlap=arch) · [Walk the 11-photo trail](https://jkubiniec.github.io/strata/?demo=walk) · [Explore all 11 placements](https://jkubiniec.github.io/strata/?demo=walk&complete=1)
+[Play with your photos](https://jkubiniec.github.io/strata/) · [Try automatic placement on your phone](https://jkubiniec.github.io/strata/?demo=autowalk) · [Try the reversible morph](https://jkubiniec.github.io/strata/?demo=walk&complete=1&overlap=arch) · [Walk the 11-photo trail](https://jkubiniec.github.io/strata/?demo=walk)
 
 Strata is a first-person browser game where you build a walkable voxel world from photographs. Start in a refinery, face its smokestacks and place a photo of a launchpad. The two scenes meet in the part of the sky you aimed at. Turn a little and add a third photo. You can walk through the overlap, look back at what you built, or mine a block and place one of your own.
 
@@ -18,9 +18,19 @@ The next recording starts at the refinery and covers 224 blocks on foot. Another
 
 ## Place your own photos
 
-1. Open **Photo bank → Load photos** and select your images together. The bank prepares depth, color and visual features on your device. You can start using it as soon as the first photo is ready.
-2. Choose **Enter world**. While walking or turning, tap **B** to place the next ready photo exactly where you aimed. Each tap captures its own viewpoint and immediately shows a depth-shaped voxel preview while the full overlap is being built. The bank cycles back to the beginning after the last ready photo. On touch screens, tap **Next photo**.
-3. Move a few steps, turn slightly and tap **B** again. Where the two captures intersect, walk forward and backward to explore the changing geometry. Your bank, its place in the rotation and your placed views are saved in this browser.
+1. Tap **Import & walk** on the phone entry screen and select several pictures in one visit to your library. This opens the world with automatic placement enabled. Strata prepares each picture on your device as you play. You can add more later through **Photo bank → Load photos**.
+2. Hold the forward arrow to walk. Drag across the scene to turn. With **Place as I move** on, walking 12 blocks or turning 35° captures your view and places the next ready photo. Each new placement waits for the preceding blend to finish. The bank wraps around at the end. Standing still holds the current blend.
+3. To revisit a finished overlap, switch **Auto** off and retrace your steps. The existing blocks still shift with your position. For manual placement, tap **Next photo** or press **B**. Your bank, cursor and placed views are saved in this browser.
+
+The mobile sample starts in the refinery with eleven source photos in its bank. Point the camera where you want each part of the world to grow. [Walk with the sample bank](https://jkubiniec.github.io/strata/?demo=autowalk)
+
+HEIC and JPEG photos can share a bank. If the browser cannot open an HEIC directly, Strata loads a local decoder and imports the primary still image. Your photos stay on your device.
+
+![Touch controls move and turn the player through the refinery. All eleven bank photos appear automatically, then the launchpad returns as the cycle begins again.](docs/media/phone-auto-walk.gif)
+
+The recording compresses 45 seconds of walking and turning. The right side shows the source photo and bearing captured at each placement. All twelve placements, including the first photo of the next cycle, came from movement.
+
+Phones use smaller textures, fewer distant chunks and an adaptive drawing resolution. The refinery opens from precomputed depth and object features. A saved atlas rebuilds its overlapping views in batches. In a cold-cache comparison at a 390 × 664 iPhone viewport, the same eleven-photo scene opened in **7.68 seconds**, down from **21.69 seconds**. Median triangles per walking frame fell from **967,014 to 390,244** along the same route. These measurements used Chrome touch emulation on a Mac GPU. Physical iPhone results will vary.
 
 **U** still opens the picker for a single photograph. **Replay placement** repeats the arrival of the newest image. Walking through an established overlap controls the blend directly through your position.
 
@@ -39,13 +49,19 @@ These are the source photographs in walking order. Under each image are its hori
 
 ## How a photo becomes a landscape
 
-Each placement records the camera position, direction and field of view. The photo is cropped to fill that frame. Depth Anything V2 Small estimates how near each visible surface is. Tiny YOLOv3 detects familiar objects and supplies visual features for matching patches across photos. Strata projects color and depth samples along camera rays to place those surfaces in world coordinates. Higher-resolution inputs receive a larger detail budget, with source textures capped at 3,072 pixels on the long edge. [Depth Anything V2](https://depth-anything-v2.github.io/) · [Darknet YOLO](https://pjreddie.com/darknet/yolo/)
+Each placement records the camera position, direction and field of view. The photo is cropped to fill that frame. Depth Anything V2 Small estimates how near each visible surface is. Tiny YOLOv3 detects familiar objects and supplies visual features for matching patches across photos. Strata projects color and depth samples along camera rays to place those surfaces in world coordinates. Higher-resolution inputs receive a larger detail budget. The saved source texture has a 1,280-pixel long edge limit on phones and a 3,072-pixel limit on desktop. The original stays in your library. [Depth Anything V2](https://depth-anything-v2.github.io/) · [Darknet YOLO](https://pjreddie.com/darknet/yolo/)
 
 Where camera views intersect, all contributing photos influence the shared geometry. Matches between image features help shift corresponding details. Nearer observations and the centers of captured views receive more weight when blending depth and color. As a placement arrives, cube centers move into their new arrangement while their faces stay aligned with the world axes. The visual reference is the kind of image transformation seen in CycleGAN and StyleGAN. Strata computes its morph from feature correspondences, estimated depths and shared 3D positions. Each matched region retains possible positions and colors from the photos that see it. On every moving frame, the player’s distance to the capture viewpoints changes their relative influence, shifting the block centers and Gaussian splats toward the nearer photo. Returning to the same position gives the same blend. Photos taken from one spot also respond to walking along their sight lines. Geometry within building reach stays aligned with the collision grid for mining and placement. **Voxels** shows the block geometry, **Splats** shows the soft Gaussian footprints that carry finer color detail, and **Hybrid** draws both. [CycleGAN research](https://junyanz.github.io/CycleGAN/)
 
 A single image leaves the backs of objects and their absolute distances unknown. Strata estimates thickness and extends terrain procedurally. Moving far from the capture view can reveal those approximations, and unrelated images can produce ghosted features in their overlap. For two research approaches to generating unseen parts of a scene, see [WonderWorld](https://arxiv.org/abs/2406.09394) and [Complete Gaussian Splats](https://nianticspatial.github.io/completesplat/).
 
 The terrain continues beyond every photo. As you walk, Strata builds 16 × 16-block chunks around your position and retires distant meshes. Returning to the same coordinates regenerates the same ground and restores your block edits. Each photo stays anchored where you placed it, so you can walk back to a familiar scene or keep extending your world with new photos.
+
+## Where to take the world next
+
+- **Give landmarks a second angle.** Photograph a doorway or the refinery stacks from two sides. An optional multi-view reconstruction pass could estimate the cameras and register the shared surfaces before voxelizing them. That would give a doorway real thickness when you walk through it and keep a stack in one place when you circle it. [VGGT](https://vgg-t.github.io/)
+- **Choose what a morph should preserve.** Let the player tap the arch in one photo and the doorway in the next. Use those two masks to guide the existing depth and color morph. That would make the opening stay recognizable throughout the transition, even when the photos depict different places.
+- **Generate the view behind a single photo.** An optional desktop processing pass could propose several plausible hidden sides of an object, let the player keep one, then bake it into a compact voxel and splat tile for the phone. A generated back is a creative choice the player can revisit. [Complete Gaussian Splats](https://nianticspatial.github.io/completesplat/)
 
 ## Run locally
 
@@ -79,4 +95,4 @@ The soft rendering layer draws on 3D Gaussian Splatting. Flash3D and SHARP infor
 
 The starter world uses the supplied refinery photograph `CAM15071.JPG`. The example also uses a SpaceX launch photograph and NASA’s portrait of astronaut Eileen Collins, both distributed by scikit-image. [SpaceX photo credit](https://scikit-image.org/docs/stable/api/skimage.data.html#skimage.data.rocket) · [NASA photo credit](https://scikit-image.org/docs/stable/api/skimage.data.html#skimage.data.astronaut)
 
-Model provenance and bundled runtime licenses are included with the app. [Vision model notices](dist/vendor/vision/NOTICE.txt) · [Three.js license](dist/vendor/THREE-LICENSE.txt)
+Model provenance and bundled runtime licenses are included with the app. [Vision model notices](dist/vendor/vision/NOTICE.txt) · [HEIC decoder notices and corresponding source](dist/vendor/heif/NOTICE.txt) · [Three.js license](dist/vendor/THREE-LICENSE.txt)
