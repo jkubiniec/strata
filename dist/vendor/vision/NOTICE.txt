@@ -1,0 +1,35 @@
+Tiny YOLOv3 object detector
+
+Authors: Joseph Redmon and Ali Farhadi.
+The source model is pjreddie's official Tiny YOLOv3 trained on the 80 COCO categories.
+  Project and model table: https://pjreddie.com/darknet/yolo/
+  Architecture: https://github.com/pjreddie/darknet/blob/master/cfg/yolov3-tiny.cfg
+  Weights: https://data.pjreddie.com/files/yolov3-tiny.weights
+  Source weights SHA-256: dccea06f59b781ec1234ddf8d1e94b9519a97f4245748a7d4db75d5b7080a42c
+  License: LICENSE-Darknet.txt
+
+yolov3-tiny.q8.bin is a local conversion of these weights. Batch normalization is folded into each convolution. Kernels are stored in HWIO order with a signed eight-bit weight and an independent float32 scale for each output channel. The network uses both original detection heads and six anchors on a 416 x 416 letterboxed RGB input. The worker expands the weights to float32 for inference.
+
+The bundled TensorFlow.js Core and WebAssembly backend are version 4.22.0, Copyright Google LLC and contributors, Apache License 2.0. See LICENSE-TensorFlow.txt.
+  Project: https://github.com/tensorflow/tfjs
+  Releases: https://www.npmjs.com/package/@tensorflow/tfjs-core/v/4.22.0
+            https://www.npmjs.com/package/@tensorflow/tfjs-backend-wasm/v/4.22.0
+
+The browser loads the runtime and weights from the same site as this application.
+
+Depth Anything V2 Small
+
+Authors: Lihe Yang, Bingyi Kang, Zilong Huang, Zhen Zhao, Xiaogang Xu, Jiashi Feng and Hengshuang Zhao. The Small model and ONNX conversion are distributed under the Apache License 2.0 (included in LICENSE-TensorFlow.txt).
+  Original project: https://github.com/DepthAnything/Depth-Anything-V2
+  Paper: https://arxiv.org/abs/2406.09414
+  ONNX export: https://huggingface.co/onnx-community/depth-anything-v2-small/blob/413ce838e669ab7dfc01a6a396bf3d4397286d7f/onnx/model_quantized.onnx
+  Converted model SHA-256: fcf51f1b230362b28690bb9d1809bf0431f29cad20534e3f589bd7285547f20d
+
+depth-v2-small.1.bin and depth-v2-small.2.bin are consecutive pieces of the unmodified quantized ONNX export. For inference, the worker assembles the model in memory and processes a resized RGB image with ImageNet normalization. The depth map stores relative inverse depth, scaled per image using the first and 99th percentiles. The model estimates the visible surfaces of one photograph.
+
+refinery-depth.bin is the 518 x 350 prediction on the bundled refinery.jpg (source photo SHA-256 a3f863621247a968cef138142acb81af01ea2817bf5b972be17f3a276d9e9a6e). The first four bytes encode width and height as little-endian uint16 values, followed by row-major 16-bit inverse depth. The starter's train detection also comes from a local Tiny YOLOv3 inference on this source. The application reuses those two fixed outputs on first launch. Newly imported photographs run both models locally, with the depth input capped according to original resolution and available memory.
+
+ONNX Runtime Web 1.22.0 is copyright Microsoft Corporation and contributors, distributed under the MIT License. See LICENSE-ONNX-Runtime.txt and NOTICE-ONNX-Dependencies.txt.
+  Runtime: https://github.com/microsoft/onnxruntime/tree/v1.22.0/js/web
+
+Additional license texts for the TensorFlow.js WebAssembly backend are included in LICENSE-XNNPACK.txt, LICENSE-FP16.txt and LICENSE-pthreadpool.txt. The detector can use the bundled TensorFlow.js CPU backend at 288 x 288 on browsers which disable WebAssembly.

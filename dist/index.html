@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#121511">
+<meta name="description" content="Build and explore a continuous voxel and Gaussian splat world from your own photographs.">
+<title>Strata — Photo worlds</title>
+<link rel="icon" type="image/svg+xml" href="./assets/strata.svg">
+<link rel="stylesheet" href="./studio.css?v=3.2">
+<script type="importmap">
+{
+  "imports": {
+    "./game.js": "./game.js?v=3.2",
+    "./world.js": "./world.js?v=3.2",
+    "./vision.js": "./vision.js?v=3.2",
+    "./morph.js": "./morph.js?v=3.2",
+    "./reconstruction.js": "./reconstruction.js?v=3.2",
+    "./interface.js": "./interface.js?v=3.2",
+    "./placements.js": "./placements.js?v=3.2",
+    "./view-volume.js": "./view-volume.js?v=3.2",
+    "./photo-fusion.js": "./photo-fusion.js?v=3.2",
+    "./stamp-clip.js": "./stamp-clip.js?v=3.2",
+    "./photo-assets.js": "./photo-assets.js?v=3.2"
+  }
+}
+</script>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="./" aria-label="Strata home"><img src="./assets/strata.svg" alt=""><span>STRATA</span></a>
+  <span class="brand-caption">World engine</span>
+  <nav aria-label="Workspace"><button id="view-world" class="nav-item active"><i data-icon="cube"></i><span>World view</span></button><button id="view-atlas" class="nav-item"><i data-icon="layers"></i><span>Photo atlas</span></button></nav>
+  <div class="top-actions"><a href="./" hidden id="demo-back">My saved world <span aria-hidden="true">↗</span></a><button id="controls" title="Controls" class="quiet"><i data-icon="keyboard"></i><span>Controls</span></button><span class="vline"></span><button id="fullscreen" class="square" aria-label="Enter fullscreen" title="Fullscreen"><i data-icon="expand"></i></button></div>
+</header>
+<main>
+ <section id="viewport" aria-label="Playable photo world">
+  <canvas id="scene" tabindex="0" aria-label="First-person world. Look in a direction and press U to place a photograph."></canvas>
+  <div class="scene-tint"></div>
+  <div class="world-heading">
+   <div class="region-tag"><span class="live-dot"></span><span id="region-no">CAPTURED VIEW</span></div>
+   <h1 id="world-title">Refinery Yard</h1>
+  </div>
+  <div class="compass" aria-label="Compass"><div class="compass-center"></div><div id="compass-tape"></div><span id="bearing">N · 000°</span></div>
+  <button id="mobile-inspector" class="hud-button" aria-label="Open world inspector" title="World inspector"><i data-icon="sliders"></i></button>
+  <div class="crosshair" aria-hidden="true"></div>
+  <button id="view-mix" aria-label="Inspect photos in this view"><span id="mix-thumbs"></span><span id="view-count">1 photo in view</span><span id="mix-meter" aria-hidden="true"></span></button>
+  <div class="entry" id="entry"><div class="aim-row"><button id="turn-left" class="aim-turn" aria-label="Turn left 15 degrees" title="Turn left 15°" disabled>↶</button><button id="play" class="play" disabled><i data-icon="play"></i><span>Enter world</span></button><button id="turn-right" class="aim-turn" aria-label="Turn right 15 degrees" title="Turn right 15°" disabled>↷</button></div><span class="entry-hint">Aim with the mouse · U places a photo</span></div>
+  <div class="inventory" id="inventory" role="toolbar" aria-label="Building materials"></div>
+  <div id="current-block"></div>
+  <div id="touch-pad" aria-label="Touch movement controls">
+   <div class="dpad"><button data-key="KeyW" aria-label="Move forward">▲</button><button data-key="KeyA" aria-label="Move left">◀</button><button data-key="KeyS" aria-label="Move back">▼</button><button data-key="KeyD" aria-label="Move right">▶</button></div>
+   <div class="touch-actions"><button data-key="Space" aria-label="Jump">↑</button><button data-act="mine">Mine</button><button data-act="place">Place</button><button data-act="photo" aria-label="Place a photo in this view">+ Photo</button><button data-act="pause">Pause</button></div>
+  </div>
+  <div id="load" role="status"><div class="load-card"><img src="./assets/strata.svg" width="36" height="36" alt=""><span id="load-label">Reading the source photograph…</span><div class="load-line"></div></div></div>
+  <div id="toast" role="status" hidden></div>
+  <div id="placement-status" role="status" hidden><span class="placing-dot" aria-hidden="true"></span><span id="placement-label"></span></div>
+ </section>
+ <aside id="inspector" aria-label="World inspector">
+  <div class="inspector-title"><span class="eyebrow"><i data-icon="sliders"></i> World inspector</span><button id="inspector-close" class="square" title="Close inspector" aria-label="Close inspector"><i data-icon="x"></i></button><i class="panel-marker" data-icon="panel"></i></div>
+  <div class="panel-scroll">
+   <section class="panel-section source-section">
+    <div class="section-title"><h2>Selected source</h2><span class="micro" id="source-index">01 / 01</span></div>
+    <button class="source-image" id="enlarge" aria-label="Inspect source photograph"><img id="thumb" src="./assets/refinery-preview.jpg" alt="Refinery with twin stacks and striped railcars"><span class="image-expand"><i data-icon="expand"></i></span><span class="image-corners"></span></button>
+    <div class="file-row"><i data-icon="image"></i><span class="filename" id="filename">CAM15071.JPG</span><span class="filetype" id="filetype">JPG</span></div>
+    <div class="file-dims" id="dimensions">6000 × 4000 px</div>
+    <div id="view-heading" class="capture-bearing">N 000°</div>
+    <button class="primary" id="add-photo" disabled><i data-icon="plus"></i>Add photo here</button>
+    <div class="view-actions"><button class="sample-path" id="path-action" disabled><i data-icon="route"></i><span>Try overlapping views</span></button><button class="sample-path" id="replay-placement" hidden><i data-icon="play"></i>Replay placement</button></div>
+   </section>
+   <section class="panel-section">
+    <div class="section-title"><h2>Scene analysis</h2><i data-icon="scan"></i></div>
+    <div class="data-row"><span>Scene type</span><span id="kind">Industrial</span></div>
+    <div class="data-row"><span>Vision layer</span><button id="vision-info" class="inline-link">Inspect <i data-icon="arrow-ne"></i></button></div>
+    <div class="palette-label">Source palette</div><div id="palette" title="Colors sampled from the source photograph"></div>
+   </section>
+   <section class="panel-section render-section">
+    <div class="section-title"><h2>Render layers</h2><i data-icon="layers"></i></div>
+    <div class="segments" role="group" aria-label="Render mode"><button data-mode="hybrid" class="selected" aria-pressed="true">Hybrid</button><button data-mode="voxel" aria-pressed="false">Voxels</button><button data-mode="splat" aria-pressed="false">Splats</button></div>
+    <label class="range-label" for="intensity"><span>Splat opacity</span><output id="intensity-out">65%</output></label>
+    <input id="intensity" type="range" min="0" max="100" value="65" style="--p:65%">
+   </section>
+  </div>
+  <button class="inspector-foot" id="notes"><i data-icon="book"></i><span>Generation notes</span><i data-icon="arrow-ne"></i></button>
+ </aside>
+</main>
+<footer class="statusbar"><div class="status-left"><span class="status-live"><b></b><span id="connection">Initializing</span></span><span class="foot-sep"></span><span class="xyz"><i data-icon="pin"></i><span id="coords">X 0 &nbsp; Y 0 &nbsp; Z 0</span></span></div><div class="status-right"><span id="flight-status">Walk mode</span><span class="foot-sep"></span><span id="fps">— FPS</span><span class="foot-sep"></span><span id="save-status"><i data-icon="drive"></i>Local session</span></div></footer>
+<input type="file" accept="image/*" id="file" hidden>
+<dialog id="modal"><div class="dialog-head"><div><div class="eyebrow" id="modal-kicker">STRATA</div><h2 id="modal-title"></h2></div><button id="close-modal" class="square" aria-label="Close dialog"><i data-icon="x"></i></button></div><div class="dialog-body" id="modal-body"></div></dialog>
+<script type="module" src="./studio.js?v=3.2"></script>
+</body>
+</html>
