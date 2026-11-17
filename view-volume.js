@@ -4,7 +4,9 @@
 import * as THREE from './vendor/three.module.js';
 import { photoDistance } from './world.js';
 import { fuseAppearance } from './photo-fusion.js';
+import { beginFusion } from './fusion-task.js';
 import { correspondence } from './morph.js';
+import { buildPhotoMotion, zeroMotionTexture, motionLimit, motionSite, viewerAffinity } from './photo-motion.js';
 
 const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
 const mix=(a,b,t)=>a+(b-a)*t;
@@ -186,18 +188,41 @@ function makeRayGrid(r) {
   }
   return {w,h,neighbors,maps,depths,skies,owned};
 }
+export function computePhotoSamples(record){
+  const grid=makeRayGrid(record);
+  return {grid,image:fuseAppearance(record,grid)};
+}
 const transitionVertex=`
   attribute vec3 startCenter;attribute vec4 startPigment;
-  uniform float placement;
+  uniform float placement,hasPhotoMotion;
+  uniform vec3 eye,forward,across,upAxis,observerEye;
+  uniform vec2 aperture,offset,motionSize;
+  uniform sampler2D motionOffsets,motionPigment;
+  varying vec3 motionColor,restPoint;
   varying vec4 initialPigment;varying float movement;
   float eased(float t){return t*t*(3.-2.*t);}
+  vec3 travel(vec3 center){
+    motionColor=vec3(0.);
+    if(hasPhotoMotion<.5)return vec3(0.);
+    vec3 d=center-eye;
+    vec2 uv=vec2(.5)+vec2(1.,-1.)*(vec2(dot(d,across),dot(d,upAxis))/max(.00001,dot(d,forward))-offset)/aperture;
+    vec2 st=(clamp(uv,0.,1.)*(motionSize-1.)+.5)/motionSize;
+    float phase=eased(placement);
+    motionColor=texture2D(motionPigment,st).rgb*phase;
+    vec3 shift=texture2D(motionOffsets,st).xyz;
+    // The cells within building reach stay registered with the collision
+    // lattice. The intervening band cannot move a distant block into reach.
+    float range=length(center-observerEye);
+    float keep=smoothstep(9.,24.,range)*min(1.,max(0.,range-9.)/max(.001,length(shift)));
+    return shift*(keep*phase);
+  }
 `;
 const vsCubes=transitionVertex+`
   attribute vec3 cellCenter;
   varying vec3 worldP,centerP,norm;
   void main(){movement=startPigment.w;initialPigment=startPigment;
     centerP=mix(startCenter,cellCenter,eased(placement));
-    worldP=centerP+position;norm=normal;
+    restPoint=centerP+position;worldP=restPoint+travel(cellCenter);norm=normal;
     gl_Position=projectionMatrix*viewMatrix*vec4(worldP,1.);
   }`;
 const projectionGL=`
@@ -211,7 +236,7 @@ const projectionGL=`
 const transitionFragment=`
   uniform float placement,retiring,retirePhase,replaying;
   uniform vec3 stampEye,stampD,stampR,stampU;uniform vec4 stampWindow;uniform vec2 stampDepth;
-  varying vec4 initialPigment;varying float movement;
+  varying vec4 initialPigment;varying float movement;varying vec3 motionColor,restPoint;
   float hashPoint(vec3 p){return fract(sin(dot(floor(p*8.),vec3(12.9898,78.233,37.719)))*43758.5453);}
   bool affected(vec3 p){vec3 d=p-stampEye;float z=dot(d,stampD);vec2 uv=vec2(dot(d,stampR),dot(d,stampU))/max(z,.000001);
     return z>=stampDepth.x && z<=stampDepth.y && all(lessThanEqual(abs(uv-stampWindow.zw),stampWindow.xy*.5));}
@@ -228,12 +253,12 @@ const fsCubes=projectionGL+transitionFragment+`
   varying vec3 worldP,centerP,norm;
   void main(){
     float vis=visibility(worldP);if(vis<=.0001 || vis<1. && hashPoint(worldP)>vis)discard;
-    vec3 uvz=photoCoords(worldP);if(outside(uvz))discard;
+    if(outside(photoCoords(worldP)))discard;vec3 uvz=photoCoords(restPoint);
     vec4 sampleColor=texture2D(radiance,uvz.xy);vec3 color=sampleColor.rgb;
     float facet=clamp(materialGrain+sampleColor.a*.40+.23*smoothstep(1.,9.,length(cameraPosition-eye)),0.,.95);
     vec3 pigment=texture2D(radiance,clamp(photoCoords(centerP).xy,0.,1.)).rgb;
     float shade=norm.y>.5?1.10:norm.y<-.5?.65:abs(norm.x)>.5?.76:.99;
-    gl_FragColor=vec4(transportedColor(mix(color,pigment,facet)*mix(1.,shade,facet)),1.);
+    gl_FragColor=vec4(transportedColor(clamp(mix(color,pigment,facet)+motionColor,0.,1.)*mix(1.,shade,facet)),1.);
     #include <colorspace_fragment>
   }`;
 const vsSurfels=transitionVertex+`
@@ -242,7 +267,8 @@ const vsSurfels=transitionVertex+`
   void main(){
     kernel=position.xy;
     movement=startPigment.w;initialPigment=startPigment;
-    worldP=mix(startCenter,surfacePoint,eased(placement))+position.x*tangentU+position.y*tangentV;
+    restPoint=mix(startCenter,surfacePoint,eased(placement))+position.x*tangentU+position.y*tangentV;
+    worldP=restPoint+travel(surfacePoint);
     gl_Position=projectionMatrix*viewMatrix*vec4(worldP,1.);
   }`;
 const fsSurfels=projectionGL+transitionFragment+`
@@ -250,15 +276,17 @@ const fsSurfels=projectionGL+transitionFragment+`
   varying vec2 kernel;varying vec3 worldP;
   void main(){
     float radius=dot(kernel,kernel);if(radius>6.25)discard;
-    vec3 uvz=photoCoords(worldP);if(outside(uvz))discard;
+    if(outside(photoCoords(worldP)))discard;vec3 uvz=photoCoords(restPoint);
     vec4 sampleColor=texture2D(radiance,uvz.xy);vec3 color=sampleColor.rgb;
     float vis=visibility(worldP);if(vis<.001)discard;
-    gl_FragColor=vec4(transportedColor(color),vis*splatOpacity*(1.-.29*sampleColor.a)*exp(-.5*radius));
+    gl_FragColor=vec4(transportedColor(clamp(color+motionColor,0.,1.)),vis*splatOpacity*(1.-.29*sampleColor.a)*exp(-.5*radius));
     #include <colorspace_fragment>
   }`;
-function uniforms(r,tex){
+function uniforms(r,tex,motion){
   const s=r.s;
-  return {placement:{value:1},retiring:{value:0},retirePhase:{value:0},replaying:{value:0},...stampUniforms(s),eye:{value:new THREE.Vector3(s.x,s.y,s.z)},forward:{value:new THREE.Vector3(s.dx,s.dy,s.dz)},
+  return {hasPhotoMotion:{value:motion?1:0},motionOffsets:{value:motion?.offsets||zeroMotionTexture},
+    motionPigment:{value:motion?.pigment||zeroMotionTexture},motionSize:{value:motion?.dimensions||new THREE.Vector2(1,1)},
+    observerEye:{value:new THREE.Vector3()},placement:{value:1},retiring:{value:0},retirePhase:{value:0},replaying:{value:0},...stampUniforms(s),eye:{value:new THREE.Vector3(s.x,s.y,s.z)},forward:{value:new THREE.Vector3(s.dx,s.dy,s.dz)},
     across:{value:new THREE.Vector3(s.rx,s.ry,s.rz)},upAxis:{value:new THREE.Vector3(s.ux,s.uy,s.uz)},
     aperture:{value:new THREE.Vector2(s.slopeX,s.slopeY)},offset:{value:new THREE.Vector2(s.offsetX||0,s.offsetY||0)},
     lensClip:{value:new THREE.Vector2(s.near,s.far)},radiance:{value:tex},materialGrain:{value:.16},splatOpacity:{value:.65}};
@@ -321,16 +349,19 @@ function startFor(r,atlas,c,active,animate){
   }
   return [x,y,z,linear[(col>>16)&255],linear[(col>>8)&255],linear[col&255],1];
 }
-function buildLayer(r,g,atlas,active,animate) {
+async function buildLayer(r,g,atlas,active,animate,image) {
   const affected=r===active?null:active.s;
-  const image=r.representative?{width:1,height:1,stride:4,data:new Uint8Array(4)}:fuseAppearance(r,g);
   const tex=textureOf(image),s=r.s,cells=new Map(),surfels=[],tangents=[],bitangents=[],p={},q={},dir={};
   const saved=r.layer,projection={};
   // A cell lying beyond a new view's boundary keeps its previous contents.
   if(saved&&affected)for(const [k,c] of saved.cells){
     if(!project(affected,c.x+.5,c.y+.5,c.z+.5,projection).inside)cells.set(k,c);
   }
+  let slice=performance.now();
+  const interactive=typeof window!=='undefined';
+  const yieldFrame=async()=>{await new Promise(resolve=>setTimeout(resolve,0));slice=performance.now();};
   for(let j=0;j<g.h;j++)for(let i=0;i<g.w;i++){
+    if(interactive&&i===0&&performance.now()-slice>10)await yieldFrame();
     const k=i+j*(g.w+1),u=i/g.w,v=j/g.h,d=g.depths[k],sky=g.skies[k];
     if(!g.owned[k])continue;
     back(s,u,v,d,p);
@@ -361,12 +392,14 @@ function buildLayer(r,g,atlas,active,animate) {
   const coords=new Float32Array(cells.size*3);let n=0;
   const starts=[],pigments=[],splatStarts=[],splatPigments=[];
   for(const c of cells.values()){
+    if(interactive&&n%6144===0&&performance.now()-slice>10)await yieldFrame();
     coords[n++]=c.x+.5;coords[n++]=c.y+.5;coords[n++]=c.z+.5;
     const start=startFor(r,atlas,c,active,animate);
     if(start[6])c.start=start;else delete c.start;
     starts.push(start[0],start[1],start[2]);pigments.push(start[3],start[4],start[5],start[6]);
   }
   for(let i=0;i<surfels.length;i+=3){
+    if(interactive&&i%6144===0&&performance.now()-slice>10)await yieldFrame();
     const x=surfels[i],y=surfels[i+1],z=surfels[i+2],c=cells.get(key(Math.floor(x),Math.floor(y),Math.floor(z)));
     const start=c?.start;
     if(start){splatStarts.push(x+start[0]-c.x-.5,y+start[1]-c.y-.5,z+start[2]-c.z-.5);splatPigments.push(...start.slice(3));}
@@ -376,7 +409,8 @@ function buildLayer(r,g,atlas,active,animate) {
       splatPigments.push(linear[p[k]],linear[p[k+1]],linear[p[k+2]],1);
     }else{splatStarts.push(x,y,z);splatPigments.push(0,0,0,0);}
   }
-  const uniformsUv=uniforms(r,tex);uniformsUv.placement.value=animate?0:1;
+  const motion=buildPhotoMotion(r,g,back,rawDepth);
+  const uniformsUv=uniforms(r,tex,motion);uniformsUv.placement.value=animate?0:1;
   const solid=new THREE.Mesh(instanced(box,{cellCenter:coords,startCenter:starts,startPigment:pigments},cells.size),
     new THREE.ShaderMaterial({uniforms:uniformsUv,vertexShader:vsCubes,fragmentShader:fsCubes,toneMapped:false,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
   solid.userData.worldAxisCubes=true;solid.userData.stampId=r.id;solid.name='World-axis photo voxels';solid.frustumCulled=false;
@@ -387,12 +421,12 @@ function buildLayer(r,g,atlas,active,animate) {
   const bounds=new THREE.Box3();
   const pt=new THREE.Vector3();
   for(const a of [coords,starts,surfels])for(let i=0;i<a.length;i+=3)bounds.expandByPoint(pt.set(a[i],a[i+1],a[i+2]));
-  if(!bounds.isEmpty())bounds.expandByScalar(3);
+  if(!bounds.isEmpty())bounds.expandByScalar(3+(motion?motionLimit:0));
   const corners=[];for(const depth of [s.near,Math.min(MAX_DEPTH+4,s.far)])for(const v of [0,1])for(const u of [0,1]){
     const k=back(s,u,v,depth,{});corners.push(new THREE.Vector3(k.x,k.y,k.z));
   }
-  const layer={root,solid,gaussian,cells,texture:tex,uniforms:uniformsUv,image,bounds,corners,resident:true,lod:0,overlap:r.neighbors.length>0,
-    depths:g.depths,w:g.w,h:g.h,dispose(){tex.dispose();solid.material.dispose();gaussian.material.dispose();solid.geometry.dispose();gaussian.geometry.dispose();}};
+  const layer={root,solid,gaussian,cells,motion,texture:tex,uniforms:uniformsUv,image,bounds,corners,resident:true,lod:0,overlap:r.neighbors.length>0,
+    depths:g.depths,w:g.w,h:g.h,dispose(){motion?.dispose();tex.dispose();solid.material.dispose();gaussian.material.dispose();solid.geometry.dispose();gaussian.geometry.dispose();}};
   changeUniforms(layer,active.s);return layer;
 }
 function gridDepth(r,u,v){
@@ -425,6 +459,21 @@ export class ViewVolumeAtlas {
     this.masked=new Set();this.cells=new Map();this.sections=new Map();this.lastSection=null;this.lastKey='';
     this.query={};this.transitionProgress=1;this.animating=false;this.retiring=[];this.transitionLayers=[];this.lastPlacement=null;
     this.frustum=new THREE.Frustum();this.vp=new THREE.Matrix4();this.camera=null;this.mode='hybrid';this.splats=.65;this.pending=Promise.resolve();this.closed=false;this.lastBounds=null;
+    this.sourceImages=new Map();this.sourceBytes=0;
+  }
+  async pixelsFor(profile){
+    const key=profile.imageBlob||profile.imageURL;
+    if(!key)return sourcePixels(profile);
+    const hit=this.sourceImages.get(key);
+    if(hit){this.sourceImages.delete(key);this.sourceImages.set(key,hit);return hit;}
+    const pixels=await sourcePixels(profile);
+    if(pixels.stride!==4)return pixels;
+    this.sourceImages.set(key,pixels);this.sourceBytes+=pixels.data.byteLength;
+    while(this.sourceBytes>36*1024*1024){
+      const oldest=this.sourceImages.keys().next().value;
+      this.sourceBytes-=this.sourceImages.get(oldest).data.byteLength;this.sourceImages.delete(oldest);
+    }
+    return pixels;
   }
   async add(profile,stamp,id,options={}) {
     // Repeated inputs during decoding are committed in input order.
@@ -439,7 +488,7 @@ export class ViewVolumeAtlas {
     if(![s.x,s.y,s.z,s.slopeX,s.slopeY,s.near,s.far].every(Number.isFinite)||s.slopeX<=0||s.slopeY<=0||s.far<=s.near)
       throw Error('Invalid photo capture projection.');
     const aspect=profile.width/profile.height||profile.gridW/profile.gridH;
-    const r={s,id:index,profile,source:await sourcePixels(profile),cropX:Math.min(1,s.aspect/aspect),cropY:Math.min(1,aspect/s.aspect),
+    const r={s,id:index,profile,source:await this.pixelsFor(profile),cropX:Math.min(1,s.aspect/aspect),cropY:Math.min(1,aspect/s.aspect),
       neighbors:[],flows:new Map(),bounds:stampBounds(s,MAX_DEPTH+3),layer:null};
     const neighbors=this.stamps.filter(other=>canShare(r,other));
     // Photos from an identical camera share one geometric sampling grid.
@@ -454,24 +503,29 @@ export class ViewVolumeAtlas {
     if(closest && similarity(closest)>.15){
       r.flows.set(closest.id,correspondence(profile,closest.profile,25,19));
     }
-    const pending=[];
+    const pending=[];let workerTask=null,observers;
     try{
       for(const old of neighbors){old.neighbors.push(r);r.neighbors.push(old);}
       if(r.flows.size)closest.flows.set(r.id,correspondence(closest.profile,profile,25,19));
-      const observers=new Set([r,...neighbors.flatMap(q=>[q,...q.neighbors])]);
-      for(const record of observers)record.source??=await sourcePixels(record.profile);
+      observers=new Set([r,...neighbors.flatMap(q=>[q,...q.neighbors])]);
+      for(const record of observers)record.source??=await this.pixelsFor(record.profile);
+      workerTask=beginFusion(observers,computePhotoSamples);
       for(const record of [...neighbors,r]){
         if(typeof window!=='undefined')await new Promise(resolve=>setTimeout(resolve,0));
         if(record.representative&&record.layer)continue;
-        const g=record.representative?{w:0,h:0,depths:new Float32Array(1)}:makeRayGrid(record);
-        pending.push([record,buildLayer(record,g,this,r,prepare)]);
+        const {grid,image}=record.representative
+          ?{grid:{w:0,h:0,depths:new Float32Array(1)},image:{width:1,height:1,stride:4,data:new Uint8Array(4)}}
+          :await workerTask.sample(record);
+        pending.push([record,await buildLayer(record,grid,this,r,prepare,image)]);
       }
-      for(const record of observers)record.source=null;
       if(this.closed)throw Error('The photo atlas is closed.');
     }catch(error){
       for(const [_,layer] of pending)layer.dispose();
       for(const old of neighbors){old.neighbors=old.neighbors.filter(q=>q!==r);old.flows.delete(r.id);}
       throw error;
+    }finally{
+      workerTask?.close();
+      if(observers)for(const record of observers)record.source=null;
     }
     this.finishTransition();
     for(const [record,layer] of pending){
@@ -484,6 +538,7 @@ export class ViewVolumeAtlas {
       record.layer=layer;this.mesh.add(layer.root);
     }
     this.stamps.push(r);this.lastBounds=r.bounds;this.indexRecord(r);
+    for(const record of [r,...neighbors])record.motionSite=motionSite(record);
     // Re-index only the affected blocks, including old occupied cells that
     // moved to a different depth when another photo entered the same volume.
     const updated=new Map();
@@ -560,11 +615,11 @@ export class ViewVolumeAtlas {
     }
     return undefined;
   }
-  contributorsAt(x,y,z){
+  contributorsAt(x,y,z,observer=null){
     const found=[];let total=0;
     for(const r of this.nearby(x,y,z)||[]){
       const q=project(r.s,x,y,z,this.query);if(!q.inside||q.d>MAX_DEPTH+2)continue;
-      const weight=observationWeight(q);if(weight<=0)continue;
+      const weight=observationWeight(q)*(observer?viewerAffinity(observer,r.motionSite||r.s):1);if(weight<=0)continue;
       total+=weight;found.push({id:r.id,weight,u:q.u,v:q.v,depth:q.d});
     }
     for(const f of found)f.weight/=total;
@@ -575,7 +630,7 @@ export class ViewVolumeAtlas {
     const s=camera?.isCamera?captureStamp(camera):cameraStamp(camera);
     const counts=new Map(),p={};let sum=0;
     for(const v of [.12,.35,.5,.65,.88])for(const u of [.1,.3,.5,.7,.9])for(const d of [22,52,85]){
-      back(s,u,v,d,p);const observations=this.contributorsAt(p.x,p.y,p.z);
+      back(s,u,v,d,p);const observations=this.contributorsAt(p.x,p.y,p.z,s);
       for(const q of observations){counts.set(q.id,(counts.get(q.id)||0)+q.weight);sum+=q.weight;}
     }
     const ids=[...counts.keys()].sort((a,b)=>a-b),weights=ids.map(id=>counts.get(id)/sum);
@@ -625,6 +680,7 @@ export class ViewVolumeAtlas {
       const target=Math.max(16,importance*Math.min(1,6291456/Math.max(1,budget)));
       const lod=Math.max(0,Math.ceil(Math.log2(native/target)*.5-.22));
       retainGpu(l,lod);l.root.visible=true;
+      if(c&&l.motion){l.motion.update(c.position);l.uniforms.observerEye.value.copy(c.position);}
       l.solid.visible=mode!=='splat';l.gaussian.visible=mode!=='voxel'&&splats>0;
       l.uniforms.materialGrain.value=mode==='voxel'?.84:.14;
       l.uniforms.splatOpacity.value=mode==='splat'?Math.min(.99,Math.max(.12,splats*1.5)):Math.min(.82,splats*.88);
@@ -643,5 +699,10 @@ export class ViewVolumeAtlas {
       l.cells.delete(k);
     }
   }
-  dispose(){this.closed=true;this.finishTransition();this.lastPlacement=null;for(const r of this.stamps)r.layer.dispose();this.mesh.clear();this.cells.clear();this.sections.clear();this.stamps.length=0;this.masked.clear();}
+  dispose(){
+    this.closed=true;this.finishTransition();this.lastPlacement=null;
+    for(const r of this.stamps)r.layer.dispose();
+    this.mesh.clear();this.cells.clear();this.sections.clear();this.stamps.length=0;this.masked.clear();
+    this.sourceImages.clear();this.sourceBytes=0;
+  }
 }

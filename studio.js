@@ -7,17 +7,27 @@ import { icons, cubeIcon, depthImage, openDatabase, readStore, writeStore } from
 import { describePose, heading, placementColor, placementMap } from './placements.js';
 import { sampleProfile, refineryFeatures, sourceBlob } from './photo-assets.js';
 import { WALK_STOPS, walkCapture, loadWalkProfile } from './walk-route.js';
+import { PhotoBank } from './photo-bank.js';
+import { prepareBankPreview, showBankPreview } from './bank-preview.js';
 
 const $=id=>document.getElementById(id);
 const requestedDemo=new URLSearchParams(location.search).get('demo');
 const walkDemo=requestedDemo==='walk';
 const completedWalk=walkDemo&&new URLSearchParams(location.search).get('complete')==='1';
+const overlapStudy=completedWalk&&new URLSearchParams(location.search).get('overlap')==='arch';
 const demo=walkDemo||requestedDemo==='views'||requestedDemo==='morph';
 let walkOrigin,walkIndex=1,walkRetryAt=0;
 const atlas=[], views=[], settings={mode:'hybrid',opacity:65,fov:65};
 let game,db,library,ready=false,busy=false,playing=false,region=0,latestStats=null,selected=0,inspectedURL;
 let pendingPlacement=null, visibleKey='', selectedViewId=null;
 let noticeTimer,saveTimer,saveFailed=false;
+const exampleBank=[], savedBankSources=new Set();
+let bankOpen=false,bankPlacements=0,lastBankTime=0;
+const bank=new PhotoBank(async file=>{
+  const source=await prepareFile(file);
+  prepareBankPreview(source.profile);
+  return source;
+},renderBank,()=>notice('Browser storage is unavailable for the bank. Photos can still be prepared for this session.'));
 const pad=n=>String(n).padStart(2,'0');
 const cap=s=>s.charAt(0).toUpperCase()+s.slice(1);
 function notice(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>$('toast').hidden=true,4500);}
@@ -29,6 +39,25 @@ function setLoading(message){
 function buttons(){
   for(const id of ['play','turn-left','turn-right'])$(id).disabled=!ready;
   for(const id of ['add-photo','path-action','replay-placement'])$(id).disabled=busy||!ready;
+  renderBank();
+}
+function renderBank(){
+  const items=bank.items.length?bank.items:exampleBank;
+  let count=0,failed=0;
+  for(const item of items){if(item.profile)count++;else if(item.failed)failed++;}
+  const remaining=items.length-count-failed;
+  const next=bank.next(exampleBank);
+  $('bank-load').disabled=!bankOpen;
+  $('bank-next').disabled=!ready||!next;
+  $('bank-touch').hidden=!ready||!next;
+  $('bank-count').textContent=count+' ready'+(remaining?' · '+remaining+' preparing':'')+(failed?' · '+failed+' unreadable':'');
+  $('bank-upcoming').textContent=next?(!bank.items.length?'Sample · ':'Next · ')+next.name:
+    remaining?'Preparing photos on this device…':'Load photos, then press B as you explore.';
+  $('bank-thumb').hidden=!next;
+  if(next&&$('bank-thumb').getAttribute('src')!==next.thumb)$('bank-thumb').src=next.thumb;
+  if(!next)$('bank-thumb').removeAttribute('src');
+  $('bank-pending').hidden=!bankPlacements;
+  $('bank-pending').textContent=bankPlacements===1?'Blending one placement…':'Blending '+bankPlacements+' placements…';
 }
 function setSaved(text){$('save-status').lastChild.textContent=' '+text;}
 function saveSettings(){
@@ -176,7 +205,7 @@ function inspectImage(which='photo'){
 }
 function showControls(){
   const b=pop('FIELD GUIDE','Controls');
-  const actions=[['Walk',['W','A','S','D']],['Look around',['Mouse','I','J','K','L']],['Jump / ascend in flight',['Space']],['Sprint',['Shift']],['Toggle flight',['F','2× Space']],['Descend in flight',['Q']],['Mine / place block',['Left / E','Right / R']],['Select material',['1–7','Wheel']],['Pick targeted block',['Middle click']],['Place a photo in this view',['U']],['Release mouse / pause',['Esc']]];
+  const actions=[['Walk',['W','A','S','D']],['Look around',['Mouse','I','J','K','L']],['Jump / ascend in flight',['Space']],['Sprint',['Shift']],['Toggle flight',['F','2× Space']],['Descend in flight',['Q']],['Mine / place block',['Left / E','Right / R']],['Select material',['1–7','Wheel']],['Pick targeted block',['Middle click']],['Place next bank photo',['B']],['Choose one photo for this view',['U']],['Release mouse / pause',['Esc']]];
   const list=document.createElement('dl');list.className='key-list';
   for(const [name,keys] of actions){const dt=document.createElement('dt');dt.textContent=name;const dd=document.createElement('dd');keys.forEach(key=>{const k=document.createElement('kbd');k.textContent=key;dd.append(k,' ');});list.append(dt,dd);}
   b.append(list);const p=document.createElement('p');p.textContent='On a touch screen, drag to look and use the on-screen movement and building controls.';b.append(p);
@@ -191,9 +220,9 @@ function showNotes(){
     <h3>Reconstructing the photograph</h3>
     <p>Depth Anything V2 estimates how far each part of the image sits from the camera. The original colors are projected onto those surfaces. Near objects move farther across your view when you step sideways. Farther surfaces extend behind silhouettes to fill some of the newly exposed space.</p>
     <h3>Placing a photograph</h3>
-    <p>Each upload remembers the camera position, yaw, pitch, field of view and frame shape at the instant you open the picker. Image depth places its samples in a volume in front of that camera. Turn or walk before placing another photograph to choose where their volumes intersect.</p>
+    <p>A single upload captures your viewpoint when you open the picker. The photo bank prepares several images ahead of time. Each press of B places its next ready photo at that instant’s position, angle and field of view. Walk or turn between presses to change where the photographs overlap.</p>
     <h3>Blending shared space</h3>
-    <p>Only photographs that cover a location can contribute to it. Blocks stay aligned to the same world axes as their positions and materials change. Gaussian splats carry softer color and detail between their faces. Return to any saved camera using Photo atlas.</p>
+    <p>Step toward a photo’s capture point and matching blocks and Gaussian splats shift toward its shapes and colors. Retrace your steps to reverse the change. Block faces stay aligned with the world axes, and blocks within building reach stay on the collision grid. Photo atlas recalls any saved viewpoint.</p>
     <h3>Exploring beyond the camera</h3>
     <p>The photograph supplies the visible appearance. Voxel terrain and scene-specific rules supply solid ground and plausible hidden faces. The inspector lets you isolate the voxels or splats and inspect the estimated depth. All photo analysis runs on this device.</p>
     <h3>Walkthrough photographs</h3>
@@ -237,32 +266,92 @@ function nameRegion(name,kind){
   const defaults={industrial:'Industrial Yard',woodland:'Woodland',urban:'City Quarter',landscape:'Open Country',interior:'Interior',object:'Photo Garden'};
   return !stem||/^(img|cam|pxl|dsc|photo|image|screenshot|\d{3})/i.test(stem)?defaults[kind]||'Photo Region':stem.slice(0,55);
 }
+async function prepareFile(file,onProgress){
+  const url=URL.createObjectURL(file);
+  try{
+    const img=await decodeImage(url),profile=await analyzeImage(img,{onProgress});
+    profile.imageBlob=await sourceBlob(img);profile.featureVersion=1;
+    return {name:file.name,title:nameRegion(file.name,profile.kind),thumb:thumbnail(img),profile};
+  }finally{URL.revokeObjectURL(url);}
+}
 async function installView(record,options={}){
   const index=await game.addViewPhoto(record.profile,record.capture,options);
   views[index]=record;
+  if(demo&&!record.bankSourceId&&(record.id==='region-0'||record.id==='launch'||record.id==='astronaut'||WALK_STOPS.some(stop=>record.id==='walk-'+stop.id))){
+    exampleBank.push(record);
+    prepareBankPreview(record.profile);renderBank();
+  }
   return index;
 }
 async function persistView(record){
   if(!library||saveFailed)return;
-  try{await writeStore(library,'regions',record);setSaved(demo?'Sample atlas':'Saved locally');}
+  try{
+    if(record.bankSourceId){
+      const {bankSourceId,profile,thumb,...view}=record;
+      // Each world owns its sources. Commit a new source and its pose together
+      // so an interrupted placement cannot leave a view with dangling pixels.
+      const tx=library.transaction(['settings','regions'],'readwrite');
+      if(!savedBankSources.has(bankSourceId))tx.objectStore('settings').put({profile,thumb},'bank-source/'+bankSourceId);
+      tx.objectStore('regions').put({...view,bankSourceId});
+      await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);});
+      savedBankSources.add(bankSourceId);
+    }else{await writeStore(library,'regions',record);}
+    setSaved(demo?'Sample atlas':'Saved locally');
+  }
   catch{saveFailed=true;setSaved('Session only');notice('This photo is playable for this session. Browser storage could not save it.');}
+}
+async function restoreBankViews(records){
+  const sources=new Map();
+  await Promise.all(records.map(async record=>{
+    if(!record.bankSourceId||record.profile)return;
+    const id=record.bankSourceId;
+    if(!sources.has(id))sources.set(id,readStore(library,'settings','bank-source/'+id));
+    const source=await sources.get(id);
+    if(!source?.profile)throw Error('A saved bank photograph is missing.');
+    Object.assign(record,source);
+    savedBankSources.add(id);
+  }));
+}
+async function placeBankPhoto(){
+  if(!ready)return;
+  const capture=game.captureView(),source=bank.take(exampleBank);
+  if(!source){notice(bank.items.some(item=>item.file)?'The first bank photo is still preparing.':'Load photos in the Photo bank to use B.');return;}
+  lastBankTime=Math.max(Date.now(),lastBankTime+1);
+  const record={id:crypto.randomUUID(),created:lastBankTime,name:source.name,title:source.title,
+    thumb:source.thumb,profile:source.profile,capture,bankSourceId:source.id};
+  const preview=showBankPreview(game,source.profile,capture);
+  bankPlacements++;renderBank();
+  notice(source.title+' · '+heading(capture.yaw));
+  // Save the pose before the expensive final merge. A reload can replay every
+  // accepted tap, including placements whose geometry had still been queued.
+  const journal=persistView(record);
+  try{
+    const index=await installView(record);preview.finish();
+    displayRegion(index);updateViewHUD(latestStats);updatePathAction();saveSettings();
+    await journal;
+  }catch(error){
+    preview.remove();console.error(error);await journal;
+    if(library){
+      const tx=library.transaction('regions','readwrite');
+      tx.objectStore('regions').delete(record.id);
+    }
+    notice('Could not finish placing '+source.title+'.');
+  }finally{bankPlacements--;renderBank();}
 }
 async function addFile(file,placement){
   if(!file||busy||!ready)return;
   const {capture,resume}=placement||{capture:game.captureView(),resume:playing};
   pendingPlacement=null;busy=true;buttons();syncSuspension();if(resume&&!playing)game.play();$('inspector').classList.remove('open');setLoading('Reading '+file.name+'…');
-  const url=URL.createObjectURL(file);
   let record;
   try{
-    const img=await decodeImage(url),profile=await analyzeImage(img,{onProgress:setLoading});
-    profile.imageBlob=await sourceBlob(img);profile.featureVersion=1;
-    const r={id:crypto.randomUUID(),created:Date.now(),name:file.name,title:nameRegion(file.name,profile.kind),thumb:thumbnail(img),profile,capture};
+    const source=await prepareFile(file,setLoading);
+    const r={...source,id:crypto.randomUUID(),created:Date.now(),capture};
     setLoading('Placing photo at '+heading(capture.yaw)+'…');await new Promise(resolve=>setTimeout(resolve,0));
     const index=await installView(r);
     record=r;displayRegion(index);updateViewHUD(latestStats);updatePathAction();
     notice('Photo placed · '+heading(capture.yaw));
   }catch(e){console.error(e);notice(e.name==='EncodingError'?'This browser could not decode that image. Try exporting it as JPEG, PNG, or WebP.':'Could not place this photograph. '+(e.message||'Try a different image.'));}
-  finally{URL.revokeObjectURL(url);$('placement-status').hidden=true;busy=false;syncSuspension();buttons();}
+  finally{$('placement-status').hidden=true;busy=false;syncSuspension();buttons();}
   if(record){const saved=persistView(record);saveSettings();await saved;}
 }
 function updatePathAction(){
@@ -277,6 +366,9 @@ function wire(){
   $('modal').addEventListener('click',e=>{if(e.target===$('modal')){const b=$('modal').getBoundingClientRect();if(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)closeModal();}});
   $('modal').onclose=()=>{if(inspectedURL){URL.revokeObjectURL(inspectedURL);inspectedURL=null;}syncSuspension();$('view-atlas').classList.remove('active');$('view-world').classList.add('active');};
   $('add-photo').onclick=requestPhoto;$('file').onchange=()=>addFile($('file').files[0],pendingPlacement);
+  $('bank-load').onclick=()=>{game?.pause();$('bank-files').value='';$('bank-files').click();};
+  $('bank-files').onchange=()=>{if($('bank-files').files.length)bank.add($('bank-files').files);};
+  $('bank-next').onclick=placeBankPhoto;
   $('file').oncancel=()=>{const resume=pendingPlacement?.resume;pendingPlacement=null;if(resume)game.play();};
   $('mobile-inspector').onclick=()=>$('inspector').classList.add('open');$('inspector-close').onclick=()=>$('inspector').classList.remove('open');
   $('path-action').onclick=()=>{if(!ready||busy)return;if(views.length<2){location.href='./?demo=views';return;}$('inspector').classList.remove('open');showAtlas();};
@@ -288,14 +380,29 @@ function wire(){
   document.addEventListener('fullscreenchange',()=>$('fullscreen').setAttribute('aria-label',document.fullscreenElement?'Exit fullscreen':'Enter fullscreen'));
   for(const b of document.querySelectorAll('[data-mode]'))b.onclick=()=>{if(!game)return;settings.mode=b.dataset.mode;applySettings();queueSave();};
   $('intensity').oninput=()=>{settings.opacity=+$('intensity').value;if(game)applySettings();queueSave();};
-  window.addEventListener('keydown',e=>{if(e.repeat||$('modal').open||e.ctrlKey||e.metaKey||e.altKey)return;if(e.code==='KeyU'){e.preventDefault();requestPhoto();}if(e.code==='Escape')$('inspector').classList.remove('open');});
+  window.addEventListener('keydown',e=>{
+    if(e.repeat||$('modal').open||e.ctrlKey||e.metaKey||e.altKey||e.target?.isContentEditable)return;
+    if(e.code==='KeyB'){e.preventDefault();placeBankPhoto();}
+    if(e.code==='KeyU'){e.preventDefault();requestPhoto();}
+    if(e.code==='Escape')$('inspector').classList.remove('open');
+  });
   for(const el of document.querySelectorAll('#touch-pad [data-key]')){el.onpointerdown=e=>{e.preventDefault();el.setPointerCapture(e.pointerId);game.moveKey(el.dataset.key,true);};el.onlostpointercapture=()=>game.moveKey(el.dataset.key,false);}
-  for(const el of document.querySelectorAll('#touch-pad [data-act]'))el.onclick=()=>el.dataset.act==='photo'?requestPhoto():el.dataset.act==='pause'?game.pause():game.interact(el.dataset.act==='place');
+  for(const el of document.querySelectorAll('#touch-pad [data-act]'))el.onclick=()=>{
+    if(el.dataset.act==='bank')placeBankPhoto();
+    else if(el.dataset.act==='photo')requestPhoto();
+    else if(el.dataset.act==='pause')game.pause();
+    else game.interact(el.dataset.act==='place');
+  };
   window.addEventListener('dragover',e=>e.preventDefault());window.addEventListener('drop',e=>{e.preventDefault();if(!ready||busy)return;if(e.dataTransfer.files.length!==1){notice('Choose one photograph for each region.');return;}const placement={capture:game.captureView(),resume:playing};closeModal();addFile(e.dataTransfer.files[0],placement);});
   document.addEventListener('visibilitychange',()=>{if(document.hidden)saveSettings();});window.addEventListener('pagehide',saveSettings);
 }
 async function start(){
   wire();busy=true;buttons();
+  bank.open().then(()=>{
+    const next=bank.next(exampleBank);
+    if(next)prepareBankPreview(next.profile);
+    bankOpen=true;renderBank();
+  });
   try{
     game=new Game($('scene'),{onStats,onPlay:playState,onSelect:selectedSlot,onEdit:queueSave,onNotice:notice});syncSuspension();
     let records=[],saved=null,storedViews=[];
@@ -348,6 +455,7 @@ async function start(){
       }
       storedViews.sort((a,b)=>a.created-b.created);
     }
+    await restoreBankViews(storedViews);
     const newExample=requestedDemo==='views'&&!saved?.player&&storedViews.length===2;
     for(const r of storedViews){
       setLoading('Restoring '+r.title+'…');
@@ -368,12 +476,20 @@ async function start(){
     if(saved?.player)game.restoreState(saved.player);
     else if(walkDemo)game.turnView(Math.atan2(WALK_STOPS[1].x,-WALK_STOPS[1].z));
     else if(demo && storedViews.some(r=>r.id==='launch'))game.turnView(22*Math.PI/180);
-    const selectedIndex=views.findIndex(v=>v.id===saved?.selectedViewId);
+    let selectedIndex=views.findIndex(v=>v.id===saved?.selectedViewId);
+    if(overlapStudy){
+      selectedIndex=views.findIndex(v=>v.id==='walk-arch');
+      if(selectedIndex>=0){
+        game.goToStamp(selectedIndex);game.flying=false;
+        game.turnView(49*Math.PI/180-game.yaw,Math.PI/180-game.pitch);
+      }
+    }
     displayRegion(selectedIndex>=0?selectedIndex:demo&&!walkDemo?Math.min(1,views.length-1):0);updateViewHUD(latestStats);
     ready=true;busy=false;syncSuspension();buttons();updatePathAction();$('load').hidden=true;$('connection').textContent='World ready';
     if(demo){$('demo-back').hidden=false;if(library&&!saveFailed)setSaved('Sample atlas');}
     if(walkDemo){
       document.querySelector('.entry-hint').textContent=walkIndex<WALK_STOPS.length?'Walk toward the next photo · Select its waypoint to jump there':'Explore 11 photos · Photo atlas recalls any viewpoint';
+      if(overlapStudy)document.querySelector('.entry-hint').textContent='Walk forward into the overlap, then back to reverse the morph';
       if(latestStats)trackWalk(latestStats);
     }
   }catch(error){

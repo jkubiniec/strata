@@ -78,3 +78,10 @@ dialog:has(.guide-editor){width:min(830px,calc(100% - 28px))}
 .playing #walk-waypoint{left:16px;top:50px}
 @media(max-width:760px){#walk-waypoint{top:125px;left:16px;font-size:10px}.playing #walk-waypoint{top:45px;left:10px}}
 #walk-link{text-decoration:none}
+
+.bank-source{display:flex;align-items:center;gap:8px;min-height:27px;margin:5px 0;color:#c6d2bf;font-size:11px;overflow-wrap:anywhere}
+#bank-thumb{width:34px;height:25px;object-fit:cover;border-radius:3px;border:1px solid #59654e}
+.bank-actions{display:flex;gap:6px}
+.bank-actions .sample-path{flex:1;min-width:0;margin-top:3px}
+.bank-actions kbd{padding:0 4px;color:var(--acid);border:1px solid #68755a;border-radius:3px;font:10px var(--mono)}
+#bank-pending{display:block;margin-top:5px;color:var(--muted);font-size:10px}
