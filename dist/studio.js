@@ -6,10 +6,14 @@ import { icons, cubeIcon, depthImage, openDatabase, readStore, writeStore } from
 
 import { describePose, heading, placementColor, placementMap } from './placements.js';
 import { sampleProfile, refineryFeatures, sourceBlob } from './photo-assets.js';
+import { WALK_STOPS, walkCapture, loadWalkProfile } from './walk-route.js';
 
 const $=id=>document.getElementById(id);
 const requestedDemo=new URLSearchParams(location.search).get('demo');
-const demo=requestedDemo==='views'||requestedDemo==='morph';
+const walkDemo=requestedDemo==='walk';
+const completedWalk=walkDemo&&new URLSearchParams(location.search).get('complete')==='1';
+const demo=walkDemo||requestedDemo==='views'||requestedDemo==='morph';
+let walkOrigin,walkIndex=1,walkRetryAt=0;
 const atlas=[], views=[], settings={mode:'hybrid',opacity:65,fov:65};
 let game,db,library,ready=false,busy=false,playing=false,region=0,latestStats=null,selected=0,inspectedURL;
 let pendingPlacement=null, visibleKey='', selectedViewId=null;
@@ -90,6 +94,46 @@ function onStats(s){
   latestStats=s;compass(s.heading);$('coords').textContent='X '+Math.floor(s.x)+'  Y '+Math.floor(s.y)+'  Z '+Math.floor(s.z);
   $('fps').textContent=playing?Math.round(s.fps)+' FPS':'WebGL 2';$('flight-status').textContent=s.flying?'Fly mode':'Walk mode';
   if(views.length)updateViewHUD(s);
+  if(walkDemo&&ready)trackWalk(s);
+}
+
+function walkRecord(stop,profile) {
+  return {id:'walk-'+stop.id,created:Date.now(),profile,title:stop.title,name:stop.image.split('/').pop(),
+    thumb:stop.image,capture:walkCapture(game,stop,walkOrigin)};
+}
+function nextWalkIndex(){
+  while(walkIndex<WALK_STOPS.length&&views.some(r=>r.id==='walk-'+WALK_STOPS[walkIndex].id))walkIndex++;
+}
+function trackWalk(s) {
+  const button=$('walk-waypoint'),stop=WALK_STOPS[walkIndex];
+  if(!stop||!walkOrigin){button.hidden=true;return;}
+  const dx=walkOrigin.x+stop.x-s.x,dz=walkOrigin.z+stop.z-s.z,distance=Math.hypot(dx,dz);
+  button.hidden=false;button.disabled=busy;
+  const label=pad(walkIndex+1)+' / '+WALK_STOPS.length+' · '+stop.title+' · '+heading(Math.atan2(dx,-dz))+' · '+Math.ceil(distance)+' blocks';
+  if(button.textContent!==label)button.textContent=label;
+  if(playing&&!busy&&distance<=6&&Date.now()>walkRetryAt)placeWalkStop(false);
+}
+async function placeWalkStop(visit){
+  const stop=WALK_STOPS[walkIndex];
+  if(!stop||busy||!ready)return;
+  busy=true;buttons();
+  try{
+    setLoading('Placing '+stop.title+'…');
+    const record=walkRecord(stop,await loadWalkProfile(stop));
+    const index=await installView(record,{animate:!visit,prepareReplay:true});
+    nextWalkIndex();
+    if(visit){game.goToStamp(index);game.replayPlacement();}
+    displayRegion(index);updatePathAction();
+    notice(stop.title+(walkIndex===WALK_STOPS.length?' · All 11 photos placed. Keep exploring.':' · Photo placed'));
+    await persistView(record);saveSettings();
+  }catch(error){
+    walkRetryAt=Date.now()+8000;
+    notice('Could not place '+stop.title+'. Select the waypoint to retry.');
+    console.error(error);
+  }finally{
+    busy=false;buttons();$('placement-status').hidden=true;
+    if(latestStats)trackWalk(latestStats);
+  }
 }
 function playState(state){
   playing=state;document.body.classList.toggle('playing',state);if(state)$('inspector').classList.remove('open');if(!state)queueSave();
@@ -152,6 +196,8 @@ function showNotes(){
     <p>Only photographs that cover a location can contribute to it. Blocks stay aligned to the same world axes as their positions and materials change. Gaussian splats carry softer color and detail between their faces. Return to any saved camera using Photo atlas.</p>
     <h3>Exploring beyond the camera</h3>
     <p>The photograph supplies the visible appearance. Voxel terrain and scene-specific rules supply solid ground and plausible hidden faces. The inspector lets you isolate the voxels or splats and inspect the estimated depth. All photo analysis runs on this device.</p>
+    <h3>Walkthrough photographs</h3>
+    <p>The eleven-photo trail includes the refinery photograph, images from SpaceX and NASA, and eight public-domain National Park Service photographs. <a href="https://github.com/jkubiniec/strata#the-photo-atlas" target="_blank" rel="noreferrer">See the photographs and their credits</a>.</p>
     <h3>Research</h3>
     <p class="notes-source">Layered depth helps fill newly visible surfaces. <a href="https://www.robots.ox.ac.uk/~vgg/research/flash3d/" target="_blank" rel="noreferrer">Flash3D</a> · <a href="https://apple-aiml-research.github.io/ml-sharp/" target="_blank" rel="noreferrer">SHARP</a></p>
     <p class="notes-source">Anisotropic splats carry light and color. Cross-image feature matches guide the shape change. <a href="https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/" target="_blank" rel="noreferrer">3D Gaussian Splatting</a> · <a href="https://arxiv.org/abs/1705.01088" target="_blank" rel="noreferrer">Deep Image Analogy</a></p>`;
@@ -235,6 +281,7 @@ function wire(){
   $('mobile-inspector').onclick=()=>$('inspector').classList.add('open');$('inspector-close').onclick=()=>$('inspector').classList.remove('open');
   $('path-action').onclick=()=>{if(!ready||busy)return;if(views.length<2){location.href='./?demo=views';return;}$('inspector').classList.remove('open');showAtlas();};
   $('view-mix').onclick=()=>{if(ready&&!busy)showAtlas();};
+  $('walk-waypoint').onclick=()=>placeWalkStop(true);
   $('replay-placement').onclick=()=>{if(ready&&!busy){game.replayPlacement();$('inspector').classList.remove('open');}};
   for(const [id,sign] of [['turn-left',-1],['turn-right',1]])$(id).onclick=()=>{if(ready){game.turnView(sign*Math.PI/12);saveSettings();}};
   $('fullscreen').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{notice('Fullscreen is unavailable in this browser view.');}};
@@ -253,8 +300,8 @@ async function start(){
     game=new Game($('scene'),{onStats,onPlay:playState,onSelect:selectedSlot,onEdit:queueSave,onNotice:notice});syncSuspension();
     let records=[],saved=null,storedViews=[];
     try{
-      const legacyDb=demo?(requestedDemo==='views'?'strata-view-example-base-v1':'strata-sample-world-v1'):undefined;
-      const libraryName=demo?(requestedDemo==='views'?'strata-view-example-v1':'strata-view-migrated-example-v1'):'strata-directional-photos-v1';
+      const legacyDb=walkDemo?'strata-walk-base-v1':demo?(requestedDemo==='views'?'strata-view-example-base-v1':'strata-sample-world-v1'):undefined;
+      const libraryName=walkDemo?(completedWalk?'strata-completed-walk-v1':'strata-photo-walk-v1'):demo?(requestedDemo==='views'?'strata-view-example-v1':'strata-view-migrated-example-v1'):'strata-directional-photos-v1';
       [db,library]=await Promise.all([openDatabase(legacyDb),openDatabase(libraryName)]);
       const [oldRegions,oldSession,photos,session]=await Promise.all([readStore(db,'regions'),readStore(db,'settings','session'),readStore(library,'regions'),readStore(library,'settings','session')]);
       records=oldRegions;storedViews=photos.sort((a,b)=>a.created-b.created||String(a.id).localeCompare(String(b.id)));saved=session||oldSession;
@@ -288,7 +335,8 @@ async function start(){
     });
     game.goTo(0);
     for(const [i,r] of legacyViews.entries())await installView(r,{reference:i===0,animate:false});
-    if(demo && (requestedDemo==='views'||atlas.length===1)){
+    if(walkDemo)walkOrigin=legacyViews[0].capture;
+    if(demo && !walkDemo && (requestedDemo==='views'||atlas.length===1)){
       const origin=legacyViews[0].capture;
       const samples=[['launch','Launch Pad','Falcon 9 launch.jpg',22],['astronaut','Astronaut','Eileen Collins.png',46]];
       for(const [name,title,file,offset] of samples){
@@ -305,14 +353,29 @@ async function start(){
       setLoading('Restoring '+r.title+'…');
       await installView(r,{prepareReplay:r===storedViews.at(-1),animate:newExample&&r.id==='astronaut'&&!matchMedia('(prefers-reduced-motion: reduce)').matches});
     }
+    if(walkDemo){
+      $('walk-link').hidden=true;
+      nextWalkIndex();
+      if(completedWalk)while(walkIndex<WALK_STOPS.length){
+        const stop=WALK_STOPS[walkIndex];setLoading('Placing '+stop.title+' · '+(walkIndex+1)+' of '+WALK_STOPS.length+'…');
+        const record=walkRecord(stop,await loadWalkProfile(stop));
+        await installView(record,{animate:false,prepareReplay:walkIndex===WALK_STOPS.length-1});nextWalkIndex();
+        await persistView(record);
+      }
+    }
     Object.assign(settings,{mode:saved?.mode||'hybrid',opacity:saved?.opacity??65,fov:saved?.fov||legacyViews[0].capture.fov});
     applySettings();
     if(saved?.player)game.restoreState(saved.player);
+    else if(walkDemo)game.turnView(Math.atan2(WALK_STOPS[1].x,-WALK_STOPS[1].z));
     else if(demo && storedViews.some(r=>r.id==='launch'))game.turnView(22*Math.PI/180);
     const selectedIndex=views.findIndex(v=>v.id===saved?.selectedViewId);
-    displayRegion(selectedIndex>=0?selectedIndex:demo?Math.min(1,views.length-1):0);updateViewHUD(latestStats);
+    displayRegion(selectedIndex>=0?selectedIndex:demo&&!walkDemo?Math.min(1,views.length-1):0);updateViewHUD(latestStats);
     ready=true;busy=false;syncSuspension();buttons();updatePathAction();$('load').hidden=true;$('connection').textContent='World ready';
     if(demo){$('demo-back').hidden=false;if(library&&!saveFailed)setSaved('Sample atlas');}
+    if(walkDemo){
+      document.querySelector('.entry-hint').textContent=walkIndex<WALK_STOPS.length?'Walk toward the next photo · Select its waypoint to jump there':'Explore 11 photos · Photo atlas recalls any viewpoint';
+      if(latestStats)trackWalk(latestStats);
+    }
   }catch(error){
     console.error(error);busy=false;$('connection').textContent='World unavailable';document.body.classList.add('world-error');
     setLoading(/WebGL|graphics context/i.test(error.message)?'Strata needs WebGL 2. Open this page in a hardware-accelerated browser.':'The world could not start. '+error.message);

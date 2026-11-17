@@ -7,21 +7,22 @@
 <meta name="description" content="Build and explore a continuous voxel and Gaussian splat world from your own photographs.">
 <title>Strata — Photo worlds</title>
 <link rel="icon" type="image/svg+xml" href="./assets/strata.svg">
-<link rel="stylesheet" href="./studio.css?v=3.2">
+<link rel="stylesheet" href="./studio.css?v=3.3">
 <script type="importmap">
 {
   "imports": {
-    "./game.js": "./game.js?v=3.2",
-    "./world.js": "./world.js?v=3.2",
-    "./vision.js": "./vision.js?v=3.2",
-    "./morph.js": "./morph.js?v=3.2",
-    "./reconstruction.js": "./reconstruction.js?v=3.2",
-    "./interface.js": "./interface.js?v=3.2",
-    "./placements.js": "./placements.js?v=3.2",
-    "./view-volume.js": "./view-volume.js?v=3.2",
-    "./photo-fusion.js": "./photo-fusion.js?v=3.2",
-    "./stamp-clip.js": "./stamp-clip.js?v=3.2",
-    "./photo-assets.js": "./photo-assets.js?v=3.2"
+    "./game.js": "./game.js?v=3.3",
+    "./world.js": "./world.js?v=3.3",
+    "./vision.js": "./vision.js?v=3.3",
+    "./morph.js": "./morph.js?v=3.3",
+    "./reconstruction.js": "./reconstruction.js?v=3.3",
+    "./interface.js": "./interface.js?v=3.3",
+    "./placements.js": "./placements.js?v=3.3",
+    "./view-volume.js": "./view-volume.js?v=3.3",
+    "./photo-fusion.js": "./photo-fusion.js?v=3.3",
+    "./stamp-clip.js": "./stamp-clip.js?v=3.3",
+    "./photo-assets.js": "./photo-assets.js?v=3.3",
+    "./walk-route.js": "./walk-route.js?v=3.3"
   }
 }
 </script>
@@ -45,6 +46,7 @@
   <button id="mobile-inspector" class="hud-button" aria-label="Open world inspector" title="World inspector"><i data-icon="sliders"></i></button>
   <div class="crosshair" aria-hidden="true"></div>
   <button id="view-mix" aria-label="Inspect photos in this view"><span id="mix-thumbs"></span><span id="view-count">1 photo in view</span><span id="mix-meter" aria-hidden="true"></span></button>
+  <button id="walk-waypoint" hidden title="Walk to this waypoint to place its photo, or select it to jump there"></button>
   <div class="entry" id="entry"><div class="aim-row"><button id="turn-left" class="aim-turn" aria-label="Turn left 15 degrees" title="Turn left 15°" disabled>↶</button><button id="play" class="play" disabled><i data-icon="play"></i><span>Enter world</span></button><button id="turn-right" class="aim-turn" aria-label="Turn right 15 degrees" title="Turn right 15°" disabled>↷</button></div><span class="entry-hint">Aim with the mouse · U places a photo</span></div>
   <div class="inventory" id="inventory" role="toolbar" aria-label="Building materials"></div>
   <div id="current-block"></div>
@@ -67,6 +69,7 @@
     <div id="view-heading" class="capture-bearing">N 000°</div>
     <button class="primary" id="add-photo" disabled><i data-icon="plus"></i>Add photo here</button>
     <div class="view-actions"><button class="sample-path" id="path-action" disabled><i data-icon="route"></i><span>Try overlapping views</span></button><button class="sample-path" id="replay-placement" hidden><i data-icon="play"></i>Replay placement</button></div>
+    <a class="sample-path" id="walk-link" href="./?demo=walk"><i data-icon="route"></i>Walk the 11-photo trail</a>
    </section>
    <section class="panel-section">
     <div class="section-title"><h2>Scene analysis</h2><i data-icon="scan"></i></div>
@@ -87,6 +90,6 @@
 <footer class="statusbar"><div class="status-left"><span class="status-live"><b></b><span id="connection">Initializing</span></span><span class="foot-sep"></span><span class="xyz"><i data-icon="pin"></i><span id="coords">X 0 &nbsp; Y 0 &nbsp; Z 0</span></span></div><div class="status-right"><span id="flight-status">Walk mode</span><span class="foot-sep"></span><span id="fps">— FPS</span><span class="foot-sep"></span><span id="save-status"><i data-icon="drive"></i>Local session</span></div></footer>
 <input type="file" accept="image/*" id="file" hidden>
 <dialog id="modal"><div class="dialog-head"><div><div class="eyebrow" id="modal-kicker">STRATA</div><h2 id="modal-title"></h2></div><button id="close-modal" class="square" aria-label="Close dialog"><i data-icon="x"></i></button></div><div class="dialog-body" id="modal-body"></div></dialog>
-<script type="module" src="./studio.js?v=3.2"></script>
+<script type="module" src="./studio.js?v=3.3"></script>
 </body>
 </html>
