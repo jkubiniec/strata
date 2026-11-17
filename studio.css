@@ -72,3 +72,9 @@ dialog:has(.guide-editor){width:min(830px,calc(100% - 28px))}
 @keyframes placing-pulse{to{opacity:.35}}
 @media(max-width:760px){#placement-status{left:10px;right:10px;bottom:151px;max-width:max-content}}
 @media(prefers-reduced-motion:reduce){.placing-dot{animation:none}#mix-meter span{transition:none}}
+
+#walk-waypoint{position:absolute;z-index:2;left:clamp(17px,3.5%,35px);top:148px;max-width:75%;padding:6px 10px;color:#e6f4d2;background:#192018e8;border:1px solid #7d8c71;border-radius:4px;text-align:left;font:11px var(--mono)}
+#walk-waypoint:hover{border-color:var(--acid)}
+.playing #walk-waypoint{left:16px;top:50px}
+@media(max-width:760px){#walk-waypoint{top:125px;left:16px;font-size:10px}.playing #walk-waypoint{top:45px;left:10px}}
+#walk-link{text-decoration:none}

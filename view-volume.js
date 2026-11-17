@@ -69,6 +69,12 @@ function confidence(u,v) {
   const margin=Math.min(u,1-u,v,1-v);
   return smooth(0,.14,margin)*Math.exp(-4.2*((u-.5)**2+(v-.5)**2));
 }
+function observationWeight(q) {
+  // Angularly broad distant observations cover much more world space per
+  // pixel. A closer camera resolves the same surface with a smaller footprint.
+  const footprint=1+Math.max(0,q.d)/23;
+  return confidence(q.u,q.v)/(footprint*footprint);
+}
 function uvWarp(flow,u,v,out) {
   const x=clamp(u)*(flow.cols-1),y=clamp(v)*(flow.rows-1);
   const i=Math.min(flow.cols-2,Math.floor(x)),j=Math.min(flow.rows-2,Math.floor(y));
@@ -137,7 +143,7 @@ function makeRayGrid(r) {
         const f=neighbors[k],q=probes[k];
         project(f.s,point.x,point.y,point.z,q);
         if(k===0){q.u=u;q.v=v;q.d=d;q.inside=true;}
-        q.w=q.inside?confidence(q.u,q.v):0;
+        q.w=q.inside?observationWeight(q):0;
         if(k===0)q.w=Math.max(.000002,q.w);
         sum+=q.w;
         if(q.w) {photoUV(f,q.u,q.v,tuv);q.su=tuv.u;q.sv=tuv.v;}
@@ -509,6 +515,38 @@ export class ViewVolumeAtlas {
     return this.lastSection;
   }
   contains(x,y,z){return this.stamps.some(r=>project(r.s,x,y,z,this.query).inside);}
+  supportingGround(x,base,z) {
+    // Carving the space in front of a depth shell can remove an entire
+    // geological column. Give that space a shallow floor tied to the
+    // surrounding terrain, tapering the excavation at each view boundary.
+    // Measure distances in world space so a pitched or shifted camera uses
+    // the same rule as a level one.
+    let cut=0;
+    for(const r of this.nearby(x,base-.5,z)||[]){
+      if(r.representative)continue; // Its radiance is already in the shared layer.
+      const s=r.s,q=project(s,x,base-.5,z,this.query);
+      if(!q.inside || q.d>MAX_DEPTH+2)continue;
+      const dx=q.d*s.slopeX*Math.min(q.u,1-q.u);
+      const dy=q.d*s.slopeY*Math.min(q.v,1-q.v);
+      const margin=Math.max(0,Math.min(dx,dy,q.d-s.near,MAX_DEPTH+2-q.d));
+      cut=Math.max(cut,Math.min(4,margin*.28));
+    }
+    const height=base-Math.floor(cut);
+    let red=0,green=0,blue=0,total=0;
+    for(const r of this.nearby(x,height,z)||[]){
+      if(r.representative)continue;
+      // Project the actual top face. Sampling at the old height would
+      // vertically displace the photograph as the player approached it.
+      const q=project(r.s,x,height,z,this.query);
+      if(!q.inside || q.d>MAX_DEPTH+2)continue;
+      const source=photoUV(r,q.u,q.v,{});
+      if(r.profile.skyMask?.[indexAt(r.profile,source.u,source.v)])continue;
+      const w=observationWeight(q),im=r.layer.image,i=lookup(im,q.u,q.v);
+      red+=im.data[i]*w;green+=im.data[i+1]*w;blue+=im.data[i+2]*w;total+=w;
+    }
+    const tint=total?(Math.round(red/total)<<16)|(Math.round(green/total)<<8)|Math.round(blue/total):undefined;
+    return {height,tint};
+  }
   sampleCell(x,y,z){
     const near=this.nearby(x+.5,y+.5,z+.5);if(!near)return undefined;
     const k=key(x,y,z),edit=this.masked.has(k);if(edit)return undefined;
@@ -526,7 +564,7 @@ export class ViewVolumeAtlas {
     const found=[];let total=0;
     for(const r of this.nearby(x,y,z)||[]){
       const q=project(r.s,x,y,z,this.query);if(!q.inside||q.d>MAX_DEPTH+2)continue;
-      const weight=confidence(q.u,q.v);if(weight<=0)continue;
+      const weight=observationWeight(q);if(weight<=0)continue;
       total+=weight;found.push({id:r.id,weight,u:q.u,v:q.v,depth:q.d});
     }
     for(const f of found)f.weight/=total;

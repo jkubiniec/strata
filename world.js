@@ -886,10 +886,27 @@ export class VoxelWorld {
     }
     return value===-1?undefined:value;
   }
+  resolvedBlock(c,x,y,z,withEdits=true,terrainMesh=false) {
+    const edit=withEdits?c.edits?.get(y):undefined;
+    if(edit!==undefined)return edit;
+    const stamp=this.viewCell(x,y,z);
+    if(stamp===undefined)return readCol(c,y,false);
+    if(stamp)return terrainMesh?0:stamp; // The photo layer renders its own solids.
+    if(y<FLOOR || y>=c.h)return 0;
+    const rec=this.viewChunks.get(key(x>>4,z>>4)),i=(z&15)*16+(x&15);
+    rec.ground??=new Array(256);
+    let ground=rec.ground[i];
+    if(!ground || ground.base!==c.h){
+      const {height,tint}=this.viewAtlas.supportingGround(x+.5,c.h,z+.5);
+      ground={base:c.h,h:Math.max(FLOOR+1,height),top:tint===undefined?c.top:pack(surfaceId(tint),tint)};
+      rec.ground[i]=ground;
+    }
+    if(y>=ground.h)return 0;
+    return y===ground.h-1?ground.top:y>=ground.h-4?c.sub:c.deep;
+  }
   rawBlock(x,y,z,withEdits=true) {
     x=Math.floor(x);y=Math.floor(y);z=Math.floor(z);
-    const c=this.column(x,z),edit=withEdits?c.edits?.get(y):undefined;
-    return edit??this.viewCell(x,y,z)??readCol(c,y,false);
+    return this.resolvedBlock(this.column(x,z),x,y,z,withEdits);
   }
   getBlock(x,y,z) { return this.rawBlock(x,y,z)>>>24; }
   getGeneratedBlock(x,y,z) { return this.rawBlock(x,y,z,false)>>>24; }
@@ -931,7 +948,7 @@ export class VoxelWorld {
     const read=(x,y,z)=>{
       const col=columns[(z+1)*18+x+1]||stub;
       if(!stamped)return readCol(col,y);
-      return col.edits?.get(y)??this.viewCell(x0+x,y,z0+z)??readCol(col,y,false);
+      return this.resolvedBlock(col,x0+x,y,z0+z);
     };
     const covered=(x,y,z,col)=>stamped && !col.edits?.has(y) && this.viewCell(x0+x,y,z0+z)!==undefined;
     const fineMask=(col,y)=>col?.micro && !col.edits?.has(y)?col.micro.get(y):undefined;
@@ -997,7 +1014,8 @@ export class VoxelWorld {
       if(stamped)lo=Math.min(lo,Math.max(FLOOR,this.viewChunks.get(k).lo-1));
       if(c.edits || columns[offset-1].edits || columns[offset+1].edits || columns[offset-18].edits || columns[offset+18].edits) lo=FLOOR;
       for(let y=lo;y<c.h;y++) {
-        const raw=readCol(c,y); if(raw && !covered(x,y,z,c)) emit(x,y,z,raw);
+        const raw=stamped?this.resolvedBlock(c,x0+x,y,z0+z,true,true):readCol(c,y);
+        if(raw) emit(x,y,z,raw);
       }
       if(c.forms) for(const [y,raw] of c.forms) if(y>=c.h && !c.edits?.has(y) && !(c.lane && y<c.h+5) && !covered(x,y,z,c)) emit(x,y,z,raw);
       if(c.edits) for(const [y,raw] of c.edits) if((y>=c.h || y<FLOOR) && raw) emit(x,y,z,raw);
