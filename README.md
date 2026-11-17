@@ -1,5 +1,7 @@
 # Strata
 
+[Play Strata](https://jkubiniec.github.io/strata/) · [Explore the three-photo demo](https://jkubiniec.github.io/strata/?demo=views)
+
 Strata is a first-person browser game where you build a walkable voxel world from photographs. Start in a refinery, face its smokestacks and place a photo of a launchpad. The two scenes meet in the part of the sky you aimed at. Turn a little and add a third photo. You can walk through the overlap, look back at what you built, or mine a block and place one of your own.
 
 ![From a fixed viewpoint, a space launch photo blends into the refinery as blocks move into place.](docs/media/directional-placement.gif)
