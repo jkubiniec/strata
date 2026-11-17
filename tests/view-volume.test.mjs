@@ -133,3 +133,52 @@ test('overlapping sky and pitched captures retain visible, editable terrain thro
     assert.ok(shell);assert.equal(world.getBlock(shell.x,shell.y,shell.z),shell.id);
   }finally{world.dispose();atlas.dispose();}
 });
+
+test('an already built overlap follows the viewer reversibly across all three source cameras',async()=>{
+  const atlas=new ViewVolumeAtlas(),camera=new THREE.PerspectiveCamera(60,1.5,.07,240);
+  function move(x,z){
+    camera.position.set(x,12,z);camera.updateMatrixWorld(true);atlas.update(camera,'hybrid',.7,1/60);
+    const layer=atlas.records[0].layer;
+    const {indices,weights}=atlas.viewBlend(camera);
+    return {offset:layer.motion.offsetAt(.5,.5),colors:layer.motion.pigment.image.data.slice(),influence:Object.fromEntries(indices.map((id,i)=>[id,weights[i]]))};
+  }
+  try{
+    const capture=(x,z)=>cameraStamp({eye:{x,y:12,z},yaw:0,pitch:0,fov:60,aspect:1.5});
+    await atlas.add(source([215,56,37],.22),capture(0,0),0,{animate:false});
+    assert.equal(atlas.records[0].layer.motion,null);
+    await atlas.add(source([60,138,77],.65),capture(3,-8),1,{animate:false});
+    await atlas.add(source([48,70,225],.36),capture(7,-17),2,{animate:false,prepareReplay:true});
+    const a=move(0,0),b=move(3,-8),c=move(7,-17);
+    const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);
+    assert.ok(distance(a.offset,b.offset)>1);
+    assert.ok(distance(b.offset,c.offset)>1);
+    assert.ok(a.influence[0]>c.influence[0] && c.influence[2]>a.influence[2]);
+    assert.notDeepEqual(a.colors,b.colors);
+    assert.notDeepEqual(b.colors,c.colors);
+    const layer=atlas.records[0].layer;
+    assert.equal(layer.solid.material.uniforms.motionOffsets.value,layer.motion.offsets);
+    assert.equal(layer.gaussian.material.uniforms.motionOffsets.value,layer.motion.offsets);
+    assert.deepEqual(layer.solid.quaternion.toArray(),[0,0,0,1]);
+    assert.equal(atlas.animating,false);
+    assert.deepEqual(move(0,0),a);
+    assert.equal(atlas.replayLastPlacement(),true);atlas.update(camera,'hybrid',.7,2);
+    assert.equal(atlas.animating,false);assert.deepEqual(move(7,-17),c);
+  }finally{atlas.dispose();}
+});
+
+test('multiple photos from the same pose can be traversed by walking along the capture axis',async()=>{
+  const atlas=new ViewVolumeAtlas(),camera=new THREE.PerspectiveCamera(62,1.5,.07,190);
+  try{
+    const pose=cameraStamp({eye:{x:0,y:10,z:0},yaw:0,pitch:0,fov:62,aspect:1.5});
+    await atlas.add(source([200,90,30],.12),pose,0,{animate:false});
+    await atlas.add(source([20,47,155],.76),pose,1,{animate:false});
+    const sample=z=>{
+      camera.position.set(0,10,z);camera.updateMatrixWorld(true);
+      atlas.update(camera,'voxel',0,.06);
+      return atlas.records[0].layer.motion.offsetAt(.5,.5).z;
+    };
+    const start=sample(0),end=sample(-28);
+    assert.ok(Math.abs(end-start)>6);
+    assert.equal(sample(0),start);
+  }finally{atlas.dispose();}
+});

@@ -7,22 +7,24 @@
 <meta name="description" content="Build and explore a continuous voxel and Gaussian splat world from your own photographs.">
 <title>Strata — Photo worlds</title>
 <link rel="icon" type="image/svg+xml" href="./assets/strata.svg">
-<link rel="stylesheet" href="./studio.css?v=3.3">
+<link rel="stylesheet" href="./studio.css?v=3.4">
 <script type="importmap">
 {
   "imports": {
-    "./game.js": "./game.js?v=3.3",
-    "./world.js": "./world.js?v=3.3",
-    "./vision.js": "./vision.js?v=3.3",
-    "./morph.js": "./morph.js?v=3.3",
-    "./reconstruction.js": "./reconstruction.js?v=3.3",
-    "./interface.js": "./interface.js?v=3.3",
-    "./placements.js": "./placements.js?v=3.3",
-    "./view-volume.js": "./view-volume.js?v=3.3",
-    "./photo-fusion.js": "./photo-fusion.js?v=3.3",
-    "./stamp-clip.js": "./stamp-clip.js?v=3.3",
-    "./photo-assets.js": "./photo-assets.js?v=3.3",
-    "./walk-route.js": "./walk-route.js?v=3.3"
+    "./game.js": "./game.js?v=3.4",
+    "./world.js": "./world.js?v=3.4",
+    "./vision.js": "./vision.js?v=3.4",
+    "./morph.js": "./morph.js?v=3.4",
+    "./reconstruction.js": "./reconstruction.js?v=3.4",
+    "./interface.js": "./interface.js?v=3.4",
+    "./placements.js": "./placements.js?v=3.4",
+    "./view-volume.js": "./view-volume.js?v=3.4",
+    "./photo-fusion.js": "./photo-fusion.js?v=3.4",
+    "./stamp-clip.js": "./stamp-clip.js?v=3.4",
+    "./photo-assets.js": "./photo-assets.js?v=3.4",
+    "./walk-route.js": "./walk-route.js?v=3.4",
+    "./photo-bank.js": "./photo-bank.js?v=3.4",
+    "./bank-preview.js": "./bank-preview.js?v=3.4"
   }
 }
 </script>
@@ -36,7 +38,7 @@
 </header>
 <main>
  <section id="viewport" aria-label="Playable photo world">
-  <canvas id="scene" tabindex="0" aria-label="First-person world. Look in a direction and press U to place a photograph."></canvas>
+  <canvas id="scene" tabindex="0" aria-label="First-person world. Press B to place the next bank photo, or U to choose a photograph."></canvas>
   <div class="scene-tint"></div>
   <div class="world-heading">
    <div class="region-tag"><span class="live-dot"></span><span id="region-no">CAPTURED VIEW</span></div>
@@ -47,12 +49,12 @@
   <div class="crosshair" aria-hidden="true"></div>
   <button id="view-mix" aria-label="Inspect photos in this view"><span id="mix-thumbs"></span><span id="view-count">1 photo in view</span><span id="mix-meter" aria-hidden="true"></span></button>
   <button id="walk-waypoint" hidden title="Walk to this waypoint to place its photo, or select it to jump there"></button>
-  <div class="entry" id="entry"><div class="aim-row"><button id="turn-left" class="aim-turn" aria-label="Turn left 15 degrees" title="Turn left 15°" disabled>↶</button><button id="play" class="play" disabled><i data-icon="play"></i><span>Enter world</span></button><button id="turn-right" class="aim-turn" aria-label="Turn right 15 degrees" title="Turn right 15°" disabled>↷</button></div><span class="entry-hint">Aim with the mouse · U places a photo</span></div>
+  <div class="entry" id="entry"><div class="aim-row"><button id="turn-left" class="aim-turn" aria-label="Turn left 15 degrees" title="Turn left 15°" disabled>↶</button><button id="play" class="play" disabled><i data-icon="play"></i><span>Enter world</span></button><button id="turn-right" class="aim-turn" aria-label="Turn right 15 degrees" title="Turn right 15°" disabled>↷</button></div><span class="entry-hint">Aim with the mouse · B cycles bank photos · U chooses a photo</span></div>
   <div class="inventory" id="inventory" role="toolbar" aria-label="Building materials"></div>
   <div id="current-block"></div>
   <div id="touch-pad" aria-label="Touch movement controls">
    <div class="dpad"><button data-key="KeyW" aria-label="Move forward">▲</button><button data-key="KeyA" aria-label="Move left">◀</button><button data-key="KeyS" aria-label="Move back">▼</button><button data-key="KeyD" aria-label="Move right">▶</button></div>
-   <div class="touch-actions"><button data-key="Space" aria-label="Jump">↑</button><button data-act="mine">Mine</button><button data-act="place">Place</button><button data-act="photo" aria-label="Place a photo in this view">+ Photo</button><button data-act="pause">Pause</button></div>
+   <div class="touch-actions"><button data-key="Space" aria-label="Jump">↑</button><button data-act="mine">Mine</button><button data-act="place">Place</button><button data-act="photo" aria-label="Place a photo in this view">+ Photo</button><button id="bank-touch" data-act="bank" hidden>Next photo</button><button data-act="pause">Pause</button></div>
   </div>
   <div id="load" role="status"><div class="load-card"><img src="./assets/strata.svg" width="36" height="36" alt=""><span id="load-label">Reading the source photograph…</span><div class="load-line"></div></div></div>
   <div id="toast" role="status" hidden></div>
@@ -72,6 +74,12 @@
     <a class="sample-path" id="walk-link" href="./?demo=walk"><i data-icon="route"></i>Walk the 11-photo trail</a>
    </section>
    <section class="panel-section">
+    <div class="section-title"><h2>Photo bank</h2><span class="micro" id="bank-count" aria-live="polite">0 ready</span></div>
+    <div class="bank-source"><img id="bank-thumb" alt="" hidden><span id="bank-upcoming">Load photos, then press B as you explore.</span></div>
+    <div class="bank-actions"><button id="bank-load" class="sample-path" disabled title="Add multiple photos to the bank"><i data-icon="plus"></i>Load photos</button><button id="bank-next" class="sample-path" disabled>Place next <kbd>B</kbd></button></div>
+    <small id="bank-pending" role="status" hidden></small>
+   </section>
+   <section class="panel-section">
     <div class="section-title"><h2>Scene analysis</h2><i data-icon="scan"></i></div>
     <div class="data-row"><span>Scene type</span><span id="kind">Industrial</span></div>
     <div class="data-row"><span>Vision layer</span><button id="vision-info" class="inline-link">Inspect <i data-icon="arrow-ne"></i></button></div>
@@ -89,7 +97,8 @@
 </main>
 <footer class="statusbar"><div class="status-left"><span class="status-live"><b></b><span id="connection">Initializing</span></span><span class="foot-sep"></span><span class="xyz"><i data-icon="pin"></i><span id="coords">X 0 &nbsp; Y 0 &nbsp; Z 0</span></span></div><div class="status-right"><span id="flight-status">Walk mode</span><span class="foot-sep"></span><span id="fps">— FPS</span><span class="foot-sep"></span><span id="save-status"><i data-icon="drive"></i>Local session</span></div></footer>
 <input type="file" accept="image/*" id="file" hidden>
+<input type="file" accept="image/*" id="bank-files" multiple hidden>
 <dialog id="modal"><div class="dialog-head"><div><div class="eyebrow" id="modal-kicker">STRATA</div><h2 id="modal-title"></h2></div><button id="close-modal" class="square" aria-label="Close dialog"><i data-icon="x"></i></button></div><div class="dialog-body" id="modal-body"></div></dialog>
-<script type="module" src="./studio.js?v=3.3"></script>
+<script type="module" src="./studio.js?v=3.4"></script>
 </body>
 </html>
