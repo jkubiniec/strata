@@ -67,6 +67,18 @@ test('a single material retains its color and uniform three-way overlap respects
   assert.deepEqual([...single.data.subarray(0,4)],[...colors[0],0]);
 });
 
+test('walking a camera closer gives its observed surface more influence',async()=>{
+  const atlas=new ViewVolumeAtlas();
+  const pose=z=>cameraStamp({eye:{x:0,y:12,z},yaw:0,pitch:0,fov:62,aspect:1.5});
+  try{
+    await atlas.add(source([164,85,38]),pose(0),0,{animate:false});
+    await atlas.add(source([36,130,167]),pose(-30),1,{animate:false});
+    const [far,near]=atlas.contributorsAt(0,12,-55);
+    assert.ok(far.weight>0 && near.weight>far.weight*2);
+    assert.ok(Math.abs(far.weight+near.weight-1)<1e-6);
+  }finally{atlas.dispose();}
+});
+
 test('overlapping sky and pitched captures retain visible, editable terrain through the frame edge',async()=>{
   const atlas=new ViewVolumeAtlas(),world=new VoxelWorld(new THREE.Group());
   const capture=(yaw,pitch)=>cameraStamp({eye:{x:0,y:14,z:0},yaw,pitch,fov:64,aspect:1.6});

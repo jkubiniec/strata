@@ -301,7 +301,7 @@ async function start(){
     let records=[],saved=null,storedViews=[];
     try{
       const legacyDb=walkDemo?'strata-walk-base-v1':demo?(requestedDemo==='views'?'strata-view-example-base-v1':'strata-sample-world-v1'):undefined;
-      const libraryName=walkDemo?(completedWalk?'strata-completed-walk-v1':'strata-photo-walk-v1'):demo?(requestedDemo==='views'?'strata-view-example-v1':'strata-view-migrated-example-v1'):'strata-directional-photos-v1';
+      const libraryName=walkDemo?(completedWalk?'strata-completed-walk-v2':'strata-photo-walk-v2'):demo?(requestedDemo==='views'?'strata-view-example-v1':'strata-view-migrated-example-v1'):'strata-directional-photos-v1';
       [db,library]=await Promise.all([openDatabase(legacyDb),openDatabase(libraryName)]);
       const [oldRegions,oldSession,photos,session]=await Promise.all([readStore(db,'regions'),readStore(db,'settings','session'),readStore(library,'regions'),readStore(library,'settings','session')]);
       records=oldRegions;storedViews=photos.sort((a,b)=>a.created-b.created||String(a.id).localeCompare(String(b.id)));saved=session||oldSession;
