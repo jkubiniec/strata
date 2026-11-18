@@ -83,7 +83,7 @@ Once the server is running, open [the local game](http://127.0.0.1:8741/). Photo
 | Place the next ready photo from the bank | B |
 | Pick a single photo, release the pointer | U, Esc |
 
-Touch controls are also available. To run the geometry and correspondence tests, use Node.js 22 or later.
+On a phone, hold an arrow to walk, slide your thumb onto another arrow to steer, and lift or slide off the arrows to stop. Drag the scene with your other thumb to look around. To run the tests, use Node.js 22 or later.
 
 ```sh
 node --test tests/*.test.mjs

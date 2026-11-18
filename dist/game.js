@@ -533,6 +533,7 @@ export class Game {
     this.skyHorizon = new THREE.Color();
     this.lastLight = new THREE.Vector2(Infinity, Infinity);
     this.keys = new Set();
+    this.keyOwners = new Map();
     this.regions = [];
     this.stamps=[];
     this.viewAtlas=new ViewVolumeAtlas(this.budget);
@@ -630,6 +631,7 @@ export class Game {
       if (controls.has(event.code)) this.moveKey(event.code, false);
     });
     listen(window, 'blur', () => this.pause());
+    listen(window, 'pagehide', () => this.pause());
     listen(document, 'visibilitychange', () => { if (document.hidden) this.pause(); });
     listen(document, 'pointerlockchange', () => {
       const locked = document.pointerLockElement === this.canvas;
@@ -658,10 +660,11 @@ export class Game {
       }
       if (document.pointerLockElement === this.canvas) {
         this.interact(event.button === 2);
-        this.heldAction = { place: event.button === 2, next: performance.now() + 360 };
+        this.heldAction = { id:event.pointerId, place: event.button === 2, next: performance.now() + 360 };
       } else {
+        if (this.drag && this.drag.id !== event.pointerId) return;
         this.drag = { id: event.pointerId, x: event.clientX, y: event.clientY, travel: 0, button: event.button };
-        this.canvas.setPointerCapture?.(event.pointerId);
+        try { this.canvas.setPointerCapture?.(event.pointerId); } catch { /* The next window release still ends the drag. */ }
       }
       event.preventDefault();
     });
@@ -674,12 +677,17 @@ export class Game {
       this.look(dx, dy);
     });
     listen(window, 'pointerup', event => {
-      this.heldAction = null;
+      if (this.heldAction?.id === event.pointerId) this.heldAction = null;
       if (this.drag?.id !== event.pointerId) return;
       if (this.playing && this.drag.travel < 5) this.interact(this.drag.button === 2);
       this.drag = null;
     });
-    listen(window, 'pointercancel', () => { this.heldAction = this.drag = null; });
+    const cancelPointer = event => {
+      if (this.heldAction?.id === event.pointerId) this.heldAction = null;
+      if (this.drag?.id === event.pointerId) this.drag = null;
+    };
+    listen(window, 'pointercancel', cancelPointer, {capture:true});
+    listen(this.canvas, 'lostpointercapture', cancelPointer);
     listen(this.canvas, 'contextmenu', event => event.preventDefault());
     listen(this.canvas, 'wheel', event => {
       if (!this.playing) return;
@@ -818,7 +826,7 @@ export class Game {
     this.liveLens=f.fov;this.recalledAspect=f.aspect;
     this.camera.near=f.near;this.camera.far=f.far;
     this.liveOffsets=[f.offsetX||0,f.offsetY||0];
-    this.guidedEdge=null;this.velocityY=0;this.grounded=false;this.keys.clear();
+    this.guidedEdge=null;this.velocityY=0;this.grounded=false;this.clearKeys();
     this.updateViewport();this.updateCamera();this.updateAtmosphere(1);
     this.drawRequested=true;this.emitStats();return true;
   }
@@ -901,7 +909,7 @@ export class Game {
   pause() {
     if (!this.playing) return;
     this.playing = false;
-    this.keys.clear();
+    this.clearKeys();
     this.drag = this.heldAction = null;
     this.locked = false;
     this.outline.visible = false;
@@ -1119,16 +1127,29 @@ export class Game {
     this.grounded = false;
     this.activeRegion = index;
     this.drawRequested = true;
-    this.keys.clear();
+    this.clearKeys();
     this.renderer.shadowMap.needsUpdate = true;
     this.updateCamera();
     this.updateAtmosphere(1);
     this.emitStats();
   }
 
-  moveKey(code, pressed) {
-    if (!pressed) { this.keys.delete(code); return; }
-    if (!this.playing || this.keys.has(code)) return;
+  clearKeys() {
+    this.keys.clear();
+    this.keyOwners.clear();
+  }
+
+  moveKey(code, pressed, owner='keyboard') {
+    let owners = this.keyOwners.get(code);
+    if (!pressed) {
+      if (!owners?.delete(owner) || owners.size) return;
+      this.keyOwners.delete(code);
+      this.keys.delete(code);
+      return;
+    }
+    if (!this.playing) return;
+    if (owners) { owners.add(owner); return; }
+    this.keyOwners.set(code, new Set([owner]));
     this.useLiveViewport();
     this.keys.add(code);
     if (code !== 'Space') return;
