@@ -8,6 +8,27 @@ Walk into a photograph, turn a few degrees, and place another one. Where the two
 
 Both arcade demos draw from **69 historical images**. One visit might take you from an eruption above the Bay of Naples to a snowbound Colorado railway. The in-game **Historical atlas** gives the date, caption, credit and original collection record for every image. The public worlds start fresh and never open the browser’s personal media database. To import your own photos and videos, enter **My media world**. [Browse all 69 sources](docs/historical-atlas.md) · [Open My media world](https://jkubiniec.github.io/strata/?world=mine)
 
+## Eleven films, one landscape
+
+![A flight from the surface of the Sun out to a landscape built from eleven simultaneously playing films.](docs/media/color-film-flight.gif)
+
+Start face-on to a solar eruption. Keep the orange plasma in sight as the camera backs away and climbs. Ocean currents spread to its left, an aurora glows farther out and orbital footage hangs overhead. The flight ends 176 blocks from where it began. During the final hover, all eleven films keep changing the landscape.
+
+| From the end of the flight | From high above the side |
+| --- | --- |
+| [![An exterior view of all eleven film placements above the terraced ground.](docs/media/eleven-film-landscape.jpg)](docs/media/eleven-film-landscape.jpg) | [![A three-quarter view showing how far the film geometry extends behind the solar and ocean surfaces.](docs/media/eleven-film-profile.jpg)](docs/media/eleven-film-profile.jpg) |
+
+Both views show the same installation. To check the wide shot, we held the camera and ten films still, then advanced the eleventh. Repeating that check for every film changed visible pixels in all eleven cases.
+
+![A close flight through the overlap between orange solar plasma and blue ocean currents, with both source films playing.](docs/media/color-film-overlap.gif)
+
+NASA’s solar observation and its ocean-current simulation have no shared camera viewpoint. In Strata, both can move the same patch of blocks.
+
+- **Hover in the overlap.** Each film supplies changing color and estimated depth on its own clock. Cube centers and Gaussian splats move along the rays of the camera that placed the film. The cube faces stay square.
+- **Fly across and back.** Your position changes which film pulls harder on the shared shapes. On this 57-block round trip, the Sun’s share of the view falls from 81% to 42% and returns to 81%. Both films have moved on by the time you get back. Choose **Pause video** to try the same pass with time held still.
+
+To build a version of this world, unzip the film bank, open **My media world**, and select all eleven MP4s with **Import & walk**. Press **F** to fly. Choose **Stop cycling**, turn or move to frame a view, then press **B** to place the next ready film. The placed films keep playing. [Download the eleven-film bank (7.2 MiB)](https://raw.githubusercontent.com/jkubiniec/strata/main/docs/media/color-film-bank.zip) · [Open My media world](https://jkubiniec.github.io/strata/?world=mine) · [Film credits and original NASA, NOAA and USGS sources](docs/eleven-films.md)
+
 ## Fly around a playing film
 
 ![Flying sideways and upward around a playing steam-train film in Strata’s hybrid voxel and splat world.](docs/media/video-flight.gif)
@@ -66,7 +87,7 @@ Files, placements, edits and playback state are saved in the current browser whe
 
 **Overlapping images.** Feature correspondences give patches in two photographs matching positions. The captured views, their confidence and the player’s position determine the shared geometry. The game moves cube centers and blends colors while keeping the faces orthogonal. **Voxels**, **Splats** and **Hybrid** let you inspect the two representations separately or together. The morph is inspired by latent-space walks. It uses feature matching and spatial interpolation and runs entirely in the browser. [Deep Image Analogy](https://arxiv.org/abs/1705.01088) · [CycleGAN](https://junyanz.github.io/CycleGAN/)
 
-**Moving images.** A video placement retains the original clip for its playback clock and colors. Strata estimates depth on anchor frames, follows matching image patches across sampled frames and interpolates the results at draw time. Phone mode bounds the number of native decoders and the resolution of the depth field. Short, continuous shots preserve more movement detail than long clips with quick cuts. The initial reconstruction supplies the solid surfaces for mining and collisions.
+**Moving images.** A video placement retains the original clip for its playback clock and colors. Strata estimates depth on anchor frames, follows matching image patches across sampled frames and interpolates the results at draw time. On desktop, up to four native video decoders supply full-motion color. Other visible films interpolate their sampled color and depth on their own clocks. Each surface can combine two video observations. Phone mode keeps up to four sources active with two native decoders. Short, continuous shots preserve more movement detail than long clips with quick cuts. The initial reconstruction supplies the solid surfaces for mining and collisions.
 
 **Beyond the photographed view.** A single photo constrains the visible surfaces best. Layered depth, extrapolated hidden faces and procedural terrain fill gaps as the camera moves. At large viewpoint changes, guessed surfaces and double edges can become visible. Strata streams deterministic 16 × 16-block terrain chunks around the player and restores block edits on return. Flash3D’s multiple depth layers and SHARP’s nearby novel views informed this design. The browser implements its own voxel and splat renderer. [3D Gaussian Splatting](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/) · [Flash3D](https://www.robots.ox.ac.uk/~vgg/research/flash3d/) · [SHARP](https://apple-aiml-research.github.io/ml-sharp/)
 

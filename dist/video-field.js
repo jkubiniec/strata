@@ -148,6 +148,7 @@ function ensureFrames(state,seconds){
   state.mix=pair.mix;
 }
 function releaseNative(state){
+  state.nativeReady=false;
   const player=state.native;if(!player)return;
   player.element.pause();player.element.removeAttribute('src');player.element.load();
   if(player.objectURL)URL.revokeObjectURL(player.objectURL);
@@ -248,14 +249,19 @@ export class VideoField {
         const priority=sample.maximum*Math.pow(affinity,.34);
         return {sample,priority};
       }).sort((a,b)=>b.priority-a.priority);
-      // Each layer has two shader slots. On desktop, spend texture uploads only
-      // on films a visible layer will actually bind. Phone can fill a vacant
-      // slot from another neighbor when it shares the four-source working set.
-      for(const {sample,priority} of this.mobile?ranked:ranked.slice(0,2)){
+      // A distant film still animates its own surface, even when two closer
+      // neighbors outrank it. Coverage in its UV map gates it per pixel.
+      // Phone chooses from all neighbors within its shared four-source budget.
+      const candidates=this.mobile?ranked:ranked.slice(0,2);
+      if(!this.mobile && layer.ownVideoSample && ranked.length>2){
+        const own=ranked.find(entry=>entry.sample===layer.ownVideoSample);
+        if(own && !candidates.includes(own))candidates[1]=own;
+      }
+      for(const {sample,priority} of candidates){
         const id=sample.clip.id;
         priorities.set(id,Math.max(priorities.get(id)||0,priority));
       }
-      visible.push({layer,ranked});
+      visible.push({layer,ranked:candidates});
     }
     const byPriority=[...priorities].sort((a,b)=>b[1]-a[1]);
     const live=new Set((this.mobile?byPriority.slice(0,4):byPriority).map(([id])=>id));
@@ -274,7 +280,7 @@ export class VideoField {
       state.lastSeen=now;
       const seconds=this.elapsed(state,now);ensureFrames(state,seconds);
       if(decoded.has(id))state.nativeReady=updateNative(state,seconds,this.playing,this.mobile,now);
-      else{releaseNative(state);state.nativeReady=false;}
+      else releaseNative(state);
     }
     for(const {layer,ranked} of visible){
       const choices=ranked.filter(({sample})=>live.has(sample.clip.id)).slice(0,2);

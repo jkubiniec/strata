@@ -453,7 +453,7 @@ async function buildLayer(r,g,atlas,active,animate,image) {
   const corners=[];for(const depth of [s.near,Math.min(MAX_DEPTH+4,s.far)])for(const v of [0,1])for(const u of [0,1]){
     const k=back(s,u,v,depth,{});corners.push(new THREE.Vector3(k.x,k.y,k.z));
   }
-  const layer={root,solid,gaussian,cells,motion,videoSamples:video,texture:tex,uniforms:uniformsUv,image,bounds,corners,resident:true,lod:0,overlap:r.neighbors.length>0,
+  const layer={root,solid,gaussian,cells,motion,videoSamples:video,ownVideoSample:video.find(sample=>sample.record===r),texture:tex,uniforms:uniformsUv,image,bounds,corners,resident:true,lod:0,overlap:r.neighbors.length>0,
     depths:g.depths,w:g.w,h:g.h,dispose(){for(const item of video)item.texture.dispose();motion?.dispose();tex.dispose();solid.material.dispose();gaussian.material.dispose();solid.geometry.dispose();gaussian.geometry.dispose();}};
   changeUniforms(layer,active.s);return layer;
 }

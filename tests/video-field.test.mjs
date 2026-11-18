@@ -72,3 +72,25 @@ test('eleven visible desktop films animate together while phone keeps its four-s
     assert.equal(desktop.time('film-10'),1.25);
   }finally{desktop.dispose();phone.dispose();atlas.dispose();}
 });
+
+test('a desktop film still moves its own surface where two neighboring videos outrank it',async()=>{
+  const still={width:240,height:160,detail:.4,gridW:w,gridH:h,rgb:rgb(90),depth:new Float32Array(w*h).fill(.4),skyMask:new Uint8Array(w*h)};
+  const entries=[0,4,8].map((x,id)=>({
+    id,frame:cameraStamp({eye:{x,y:5,z:0},aspect:1.5,fov:45}),
+    profile:{...still,video:{id:'overlap-'+id,duration:3,width:240,height:160,gridW:w,gridH:h,
+      frames:[frame(0,90,90),frame(1,110+id,140+id)]}}
+  }));
+  const atlas=new ViewVolumeAtlas(phoneBudget),field=new VideoField();
+  try{
+    await atlas.restore(entries);
+    const layer=atlas.records[2].layer,own=layer.ownVideoSample;
+    assert.equal(own.record,atlas.records[2]);
+    assert.equal(layer.videoSamples.length,3);
+    for(const sample of layer.videoSamples)sample.maximum = sample === own ? .02 : 1;
+    field.setPlaying(false);field.seek(own.clip.id,1);
+    field.update(atlas,{position:{x:0,y:5,z:0}});
+    assert.equal(layer.uniforms.videoMap1.value,own.texture);
+    assert.equal(layer.uniforms.videoA1.value.image.data[3],112);
+    assert.notEqual(layer.uniforms.videoMap0.value,own.texture);
+  }finally{field.dispose();atlas.dispose();}
+});
