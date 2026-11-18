@@ -8,7 +8,7 @@ export function beginFusion(records,computeLocally) {
   }
   if(typeof Worker==='function'){
     try{
-      worker=new Worker(new URL('./fusion-worker.js?v=3.5',import.meta.url),{type:'module',name:'Strata photo fusion'});
+      worker=new Worker(new URL('./fusion-worker.js?v=4.1',import.meta.url),{type:'module',name:'Strata photo fusion'});
       worker.onerror=event=>{event.preventDefault();stop(new Error(event.message||'Photo worker unavailable'));};
       worker.onmessageerror=()=>stop(new Error('Photo worker returned unreadable data'));
       worker.onmessage=({data})=>{

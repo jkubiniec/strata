@@ -47,7 +47,7 @@ export function videoSamples(grid) {
 // Two independently clocked video observations can act on the same block.
 // Compile sampler-free shaders for the much more common static photo layers.
 export function videoUniforms(count){
-  const uniforms={};
+  const uniforms={videoRemainderGain:{value:1}};
   for(let slot=0;slot<Math.min(2,count);slot++){
     for(const name of ['videoMap','videoReference','videoA','videoB','videoNative'])uniforms[name+slot]={value:null};
     for(const name of ['videoMix','videoUseNative','videoGain'])uniforms[name+slot]={value:0};
@@ -67,41 +67,56 @@ vec3 videoObservation${i}(vec2 sourceUV){
   vec2 coords=(clamp(sourceUV,0.,1.)*(videoMapSize${i}-1.)+.5)/videoMapSize${i};
   vec3 observation=texture2D(videoMap${i},coords).xyz;
   observation.xy/=max(observation.z,.00001);
-  observation.z=clamp(observation.z*videoGain${i},0.,1.);
+  observation.z=clamp(observation.z,0.,1.);
   return observation;
 }
 #ifdef STRATA_VIDEO_VERTEX
-void videoMove${i}(vec3 p,vec2 st,inout vec3 delta,inout float total){
+void videoMove${i}(vec3 p,vec2 st,inout vec3 delta,inout vec2 weights){
   if(videoGain${i}<=0.)return;
   vec3 s=videoObservation${i}(st);if(s.z<.001)return;
   float current=mix(texture2D(videoA${i},s.xy).a,texture2D(videoB${i},s.xy).a,videoMix${i});
   float reference=texture2D(videoReference${i},s.xy).a;
   float stepDepth=74.*(pow(max(0.,1.-current),1.48)-pow(max(0.,1.-reference),1.48));
   vec3 ray=p-videoEye${i};float z=dot(ray,videoForward${i});if(z<.1)return;
-  delta+=ray/z*clamp(stepDepth,-${videoDisplacementLimit}.,${videoDisplacementLimit}.)*s.z;total+=s.z;
+  float w=s.z*videoGain${i};
+  // A foreground silhouette can uncover the far background in one frame.
+  // Keep that occlusion change local rather than throwing one cube from a
+  // nearby subject all the way to the sky. Small depth changes stay linear.
+  float referenceDistance=14.+74.*pow(max(0.,1.-reference),1.48);
+  float limit=clamp(referenceDistance*.38,7.,${videoDisplacementLimit}.);
+  float excursion=stepDepth/max(1.,abs(stepDepth)/limit);
+  delta+=ray/z*excursion*w;
+  weights+=vec2(w,s.z);
 }
 #else
-void videoPigment${i}(vec2 st,inout vec3 delta,inout float total){
+void videoPigment${i}(vec2 st,inout vec4 live,inout vec3 difference,inout vec2 weights){
   if(videoGain${i}<=0.)return;
   vec3 s=videoObservation${i}(st);if(s.z<.001)return;
-  vec3 color;
+  vec4 sampled=mix(texture2D(videoA${i},s.xy),texture2D(videoB${i},s.xy),videoMix${i});
+  vec3 color=sampled.rgb;
   if(videoUseNative${i}>.5)color=texture2D(videoNative${i},s.xy).rgb;
-  else color=mix(texture2D(videoA${i},s.xy).rgb,texture2D(videoB${i},s.xy).rgb,videoMix${i});
-  delta+=(color-texture2D(videoReference${i},s.xy).rgb)*s.z;total+=s.z;
+  float w=s.z*videoGain${i};
+  // At an overlap, near surfaces carry their contours further than distant
+  // background. Concentrate the transition around those contours so two
+  // unrelated landmarks do not persist as a uniform double exposure.
+  float focus=w*w*exp2(3.*sampled.a);
+  live+=vec4(color,1.)*focus;
+  difference+=(color-texture2D(videoReference${i},s.xy).rgb)*w;
+  weights+=vec2(w,s.z);
 }
 #endif
 #endif`;
-const slots=shaderSlot(0)+shaderSlot(1);
+const slots='uniform float videoRemainderGain;\n'+shaderSlot(0)+shaderSlot(1);
 export const videoVertexGL='#define STRATA_VIDEO_VERTEX\n'+slots+`
 vec3 videoMovement(vec3 p,vec2 uv){
-  vec3 delta=vec3(0.);float total=0.;
+  vec3 delta=vec3(0.);vec2 weights=vec2(0.);
 #if STRATA_VIDEO_SLOTS > 0
-  videoMove0(p,uv,delta,total);
+  videoMove0(p,uv,delta,weights);
 #endif
 #if STRATA_VIDEO_SLOTS > 1
-  videoMove1(p,uv,delta,total);
+  videoMove1(p,uv,delta,weights);
 #endif
-  delta/=max(1.,total);
+  delta/=max(.00001,weights.x+videoRemainderGain*max(0.,1.-weights.y));
   // Keep the static collision shell within interaction reach. The transition
   // band also prevents distant movie geometry sweeping through the camera.
   float range=length(p-cameraPosition);
@@ -109,15 +124,21 @@ vec3 videoMovement(vec3 p,vec2 uv){
   return delta*strength;
 }`;
 export const videoFragmentGL=slots+`
-vec3 videoColorDelta(vec2 uv){
-  vec3 delta=vec3(0.);float total=0.;
+vec3 videoRadiance(vec2 uv,vec3 base, float phase){
+  vec4 live=vec4(0.);vec3 difference=vec3(0.);vec2 weights=vec2(0.);
 #if STRATA_VIDEO_SLOTS > 0
-  videoPigment0(uv,delta,total);
+  videoPigment0(uv,live,difference,weights);
 #endif
 #if STRATA_VIDEO_SLOTS > 1
-  videoPigment1(uv,delta,total);
+  videoPigment1(uv,live,difference,weights);
 #endif
-  return delta/max(1.,total);
+  if(weights.x<.00001)return base;
+  // A fully filmed patch takes its actual current radiance. Adding a residual
+  // to the first high-resolution poster would leave ghosts of moving subjects.
+  vec3 mixed=base+difference/max(.00001,weights.x+videoRemainderGain*max(0.,1.-weights.y));
+  float coverage=weights.x/max(.00001,weights.x+videoRemainderGain*max(0.,1.-weights.y));
+  vec3 color=mix(mixed,live.rgb/max(.0000001,live.a),smoothstep(.72,.995,coverage));
+  return mix(base,color,phase);
 }`;
 
 function frameTexture(frame,w,h){
@@ -232,7 +253,11 @@ export class VideoField {
   }
   update(atlas,camera,now=performance.now()){
     if(this.suspended)return;
-    const visible=[],priorities=new Map(),eye=camera.position;
+    const visible=[],priorities=new Map(),eye=camera.position,affinities=new Map();
+    const affinityOf=record=>{
+      if(!affinities.has(record))affinities.set(record,viewerAffinity(eye,record.motionSite||record.s));
+      return affinities.get(record);
+    };
     // Register all placements, including invisible ones: a clip shares one
     // clock across placements and resumes at the correct time on returning.
     for(const record of atlas.stamps){
@@ -245,7 +270,7 @@ export class VideoField {
     for(const layer of layers){
       if(!layer?.root.visible||!layer.videoSamples?.length)continue;
       const ranked=layer.videoSamples.map(sample=>{
-        const affinity=viewerAffinity(eye,sample.record.motionSite||sample.record.s);
+        const affinity=affinityOf(sample.record);
         const priority=sample.maximum*Math.pow(affinity,.34);
         return {sample,priority};
       }).sort((a,b)=>b.priority-a.priority);
@@ -263,6 +288,9 @@ export class VideoField {
       }
       visible.push({layer,ranked:candidates});
     }
+    const preferred=atlas.stamps[atlas.preferredCapture],clip=preferred?.profile.video;
+    if(clip && this.sources.has(clip.id) && Math.hypot(eye.x-preferred.s.x,eye.y-preferred.s.y,eye.z-preferred.s.z)<2)
+      priorities.set(clip.id,Math.max(2,priorities.get(clip.id)||0));
     const byPriority=[...priorities].sort((a,b)=>b[1]-a[1]);
     const live=new Set((this.mobile?byPriority.slice(0,4):byPriority).map(([id])=>id));
     // Avoid bouncing one hardware decoder between nearly tied sources as the
@@ -285,6 +313,12 @@ export class VideoField {
     for(const {layer,ranked} of visible){
       const choices=ranked.filter(({sample})=>live.has(sample.clip.id)).slice(0,2);
       const u=layer.uniforms;
+      let remainder=0;
+      for(const observer of layer.videoObservers){
+        if(choices.every(({sample})=>sample.record!==observer))remainder=Math.max(remainder,affinityOf(observer));
+      }
+      const strongest=Math.max(1e-20,remainder,...choices.map(({sample})=>affinityOf(sample.record)));
+      u.videoRemainderGain.value=Math.pow(remainder/strongest,.8);
       for(let slot=0;slot<Math.min(2,ranked.length);slot++){
         const selected=choices[slot];
         if(!selected){
@@ -301,7 +335,7 @@ export class VideoField {
         u['videoReference'+slot].value=t.reference;u['videoA'+slot].value=t.a;u['videoB'+slot].value=t.b;
         u['videoNative'+slot].value=state.nativeReady?state.native.texture:t.a;
         u['videoUseNative'+slot].value=state.nativeReady?1:0;u['videoMix'+slot].value=state.mix;
-        u['videoGain'+slot].value=.95+.35*Math.sqrt(viewerAffinity(eye,sample.record.motionSite||capture));
+        u['videoGain'+slot].value=Math.pow(affinityOf(sample.record)/strongest,.8);
       }
     }
   }

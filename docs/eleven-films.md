@@ -1,4 +1,6 @@
-# Eleven moving worlds · film credits
+# Eleven-film stress test
+
+[Wide flight](media/color-film-flight.gif) · [Close overlap](media/color-film-overlap.gif) · [Front view](media/eleven-film-landscape.jpg) · [Side view](media/eleven-film-profile.jpg) · [Download the eleven-film bank](https://raw.githubusercontent.com/jkubiniec/strata/main/docs/media/color-film-bank.zip)
 
 These eleven silent excerpts are the sources for the Strata multi-video flight. Each file contains one motion sequence at 480 × 270 and 20 fps. Times below are offsets in the source movies. The solar and ocean sequences started as scientific imagery. The other nine show footage from orbit, land, or a remotely operated underwater vehicle.
 

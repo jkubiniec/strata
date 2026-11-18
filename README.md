@@ -8,26 +8,25 @@ Walk into a photograph, turn a few degrees, and place another one. Where the two
 
 Both arcade demos draw from **69 historical images**. One visit might take you from an eruption above the Bay of Naples to a snowbound Colorado railway. The in-game **Historical atlas** gives the date, caption, credit and original collection record for every image. The public worlds start fresh and never open the browser’s personal media database. To import your own photos and videos, enter **My media world**. [Browse all 69 sources](docs/historical-atlas.md) · [Open My media world](https://jkubiniec.github.io/strata/?world=mine)
 
-## Eleven films, one landscape
+## Fly from Apollo 11 to Discovery
 
-![A flight from the surface of the Sun out to a landscape built from eleven simultaneously playing films.](docs/media/color-film-flight.gif)
+Start at Cape Kennedy on July 16, 1969. The white Saturn V rises alongside its red launch tower while exhaust spreads across the pad. Fly to the side and the near smoke, tower and sky separate in depth. Cross the overlap and the runway and red drag chute of *Discovery* emerge. Arrive at its capture point and you see the shuttle rolling out on its final landing, 42 years after Apollo 11. [Enter the two-film world](https://jkubiniec.github.io/strata/?demo=flight)
 
-Start face-on to a solar eruption. Keep the orange plasma in sight as the camera backs away and climbs. Ocean currents spread to its left, an aurora glows farther out and orbital footage hangs overhead. The flight ends 176 blocks from where it began. During the final hover, all eleven films keep changing the landscape.
+![A continuous flight from Apollo 11 lifting off, through its voxel and Gaussian splat reconstruction, into the final landing of Discovery.](docs/media/apollo-discovery-flight.gif)
 
-| From the end of the flight | From high above the side |
-| --- | --- |
-| [![An exterior view of all eleven film placements above the terraced ground.](docs/media/eleven-film-landscape.jpg)](docs/media/eleven-film-landscape.jpg) | [![A three-quarter view showing how far the film geometry extends behind the solar and ocean surfaces.](docs/media/eleven-film-profile.jpg)](docs/media/eleven-film-profile.jpg) |
+Choose **Watch flight** for the recorded route, or **Enter world** to fly it yourself. The two films have independent clocks. Your position determines how much each film moves and colors the surfaces they share. Cubes keep their faces aligned to the world axes, while depth-oriented Gaussian splats carry finer moving detail. [Watch the higher-resolution MP4](https://jkubiniec.github.io/strata/assets/flight/tour.mp4) · [Compare the two source views with the overlap](docs/media/apollo-discovery-perspectives.jpg)
 
-Both views show the same installation. To check the wide shot, we held the camera and ten films still, then advanced the eleventh. Repeating that check for every film changed visible pixels in all eleven cases.
+![With the observation camera and film frames held still, the player moves across the overlap and back, reshaping the same patch of the world in both directions.](docs/media/apollo-discovery-morph.gif)
 
-![A close flight through the overlap between orange solar plasma and blue ocean currents, with both source films playing.](docs/media/color-film-overlap.gif)
+The second view holds the camera and both film clocks still. Only the player’s position changes. Watch the blocks and splats move toward the second scene and return as the player retraces the path. This spatial interpolation uses matched image features and estimated depth. The same mechanism works on the photos and films you place yourself.
 
-NASA’s solar observation and its ocean-current simulation have no shared camera viewpoint. In Strata, both can move the same patch of blocks.
+The sources are NASA Kennedy Space Center’s 70 mm transfer of the Apollo 11 launch and footage of STS-133 landing on March 9, 2011. The excerpts are silent and cropped to remove the scan and video borders. The launch excerpt plays at 1.5× the transfer speed. [Apollo 11 film record](https://images.nasa.gov/details/KSC_69-71212-sRGB) · [Discovery film record](https://images.nasa.gov/details/ksc_030911_sts133_landing) · [NASA media guidelines](https://www.nasa.gov/nasa-brand-center/images-and-media/)
 
-- **Hover in the overlap.** Each film supplies changing color and estimated depth on its own clock. Cube centers and Gaussian splats move along the rays of the camera that placed the film. The cube faces stay square.
-- **Fly across and back.** Your position changes which film pulls harder on the shared shapes. On this 57-block round trip, the Sun’s share of the view falls from 81% to 42% and returns to 81%. Both films have moved on by the time you get back. Choose **Pause video** to try the same pass with time held still.
+### Return to a scene
 
-To build a version of this world, unzip the film bank, open **My media world**, and select all eleven MP4s with **Import & walk**. Press **F** to fly. Choose **Stop cycling**, turn or move to frame a view, then press **B** to place the next ready film. The placed films keep playing. [Download the eleven-film bank (7.2 MiB)](https://raw.githubusercontent.com/jkubiniec/strata/main/docs/media/color-film-bank.zip) · [Open My media world](https://jkubiniec.github.io/strata/?world=mine) · [Film credits and original NASA, NOAA and USGS sources](docs/eleven-films.md)
+Open **Sitemap** or press **M**. Select a numbered pin to return to the position, heading, pitch and lens where that photo or video was placed. Its original framing is preserved even if you have rotated your phone. Each film continues from its own playback clock. If several cameras share a spot, choose the view by thumbnail or heading. You can also search for a filename or title.
+
+<img src="docs/media/placement-sitemap.png" width="460" alt="Strata’s clickable placement sitemap, showing the Apollo and Discovery camera positions, viewing directions and source thumbnails.">
 
 ## Fly around a playing film
 
@@ -63,11 +62,13 @@ Walking 12 blocks or turning 35° places the next ready image inside the current
 
 In the second recording, all eleven historical views are already in place. The player walks 18.1 blocks from Baltimore’s banana docks toward a French chocolate card depicting Pasteur, then retraces the route. Watch the fixed camera while the player walks forward and back. The same blocks shift in both directions, with their faces aligned to the world axes. **Replay placement** repeats the arrival of a source. Walking through an established overlap controls the blend with your position. [Enter the recorded overlap](https://jkubiniec.github.io/strata/?demo=walk&complete=1&overlap=1&seed=arcade11)
 
-## Bring your own photos and video
+## Keep extending your own world
 
 1. Open **My media world** and choose **Import & walk**. Select multiple photos and videos together in the phone library or desktop file picker. Strata prepares them on the device while you explore. JPEG, PNG and HEIC stills are supported. MP4, MOV and WebM playback depends on the browser’s codecs.
 2. With cycling on, walk or turn to place the next ready item. On a phone, hold an arrow to walk and drag the scene with your other thumb to aim. Slide across the arrows to change direction and lift to stop. On a computer, use WASD and the mouse.
 3. Tap **Stop cycling** to keep exploring the placements already in the world. **Start cycling** resumes from the bank. **G** toggles cycling and **B** places the next item immediately. Video playback has a separate pause control.
+
+Place the next scene near the edge of the last one to overlap their camera views. Change the angle and keep flying to extend the chain. The terrain streams around you as you travel. **Sitemap** brings any earlier capture back into reach.
 
 Files, placements, edits and playback state are saved in the current browser when storage is available. Private browsing and clearing site data can shorten that lifetime. Available memory and browser storage determine how much media a device can hold.
 
@@ -79,6 +80,7 @@ Files, placements, edits and playback state are saved in the current browser whe
 | Mine or place a block | Left or right mouse button, or E / R |
 | Select material | 1–7 or mouse wheel |
 | Place the next bank item / toggle cycling | B / G |
+| Open the placement sitemap | M |
 | Place one source / release the pointer | U / Esc |
 
 ## How the world is built
@@ -87,7 +89,7 @@ Files, placements, edits and playback state are saved in the current browser whe
 
 **Overlapping images.** Feature correspondences give patches in two photographs matching positions. The captured views, their confidence and the player’s position determine the shared geometry. The game moves cube centers and blends colors while keeping the faces orthogonal. **Voxels**, **Splats** and **Hybrid** let you inspect the two representations separately or together. The morph is inspired by latent-space walks. It uses feature matching and spatial interpolation and runs entirely in the browser. [Deep Image Analogy](https://arxiv.org/abs/1705.01088) · [CycleGAN](https://junyanz.github.io/CycleGAN/)
 
-**Moving images.** A video placement retains the original clip for its playback clock and colors. Strata estimates depth on anchor frames, follows matching image patches across sampled frames and interpolates the results at draw time. On desktop, up to four native video decoders supply full-motion color. Other visible films interpolate their sampled color and depth on their own clocks. Each surface can combine two video observations. Phone mode keeps up to four sources active with two native decoders. Short, continuous shots preserve more movement detail than long clips with quick cuts. The initial reconstruction supplies the solid surfaces for mining and collisions.
+**Moving images.** A video placement retains the original clip for its playback clock and colors. Strata estimates depth on anchor frames, follows matching image patches across sampled frames and interpolates the results at draw time. On desktop, up to four native video decoders supply full-motion color. Other visible films interpolate their sampled color and depth on their own clocks. Each surface can combine two video observations. Phone mode keeps up to four sources active with two native decoders. Short, continuous shots preserve more movement detail than long clips with quick cuts. The initial reconstruction supplies the solid surfaces for mining and collisions. The earlier eleven-film stress test includes its source bank and two wide views. [Explore the eleven-film study](docs/eleven-films.md)
 
 **Beyond the photographed view.** A single photo constrains the visible surfaces best. Layered depth, extrapolated hidden faces and procedural terrain fill gaps as the camera moves. At large viewpoint changes, guessed surfaces and double edges can become visible. Strata streams deterministic 16 × 16-block terrain chunks around the player and restores block edits on return. Flash3D’s multiple depth layers and SHARP’s nearby novel views informed this design. The browser implements its own voxel and splat renderer. [3D Gaussian Splatting](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/) · [Flash3D](https://www.robots.ox.ac.uk/~vgg/research/flash3d/) · [SHARP](https://apple-aiml-research.github.io/ml-sharp/)
 

@@ -991,7 +991,7 @@ export class VoxelWorld {
   dispose() {
     for(const [k,group] of this.meshes) this.dropMesh(k,group);
     this.scene.remove(this.group); this.unitBox.dispose(); this.surfaceMaterial.dispose();
-    this.trimMaterial.dispose(); this.atlas.dispose();
+    this.trimMaterial.dispose(); this.atlas.dispose(); this.terrainProjection.dispose();
     this.regions.length=0; this.queue.length=0;
     for(const index of [this.regionIndex,this.terrain,this.forms,this.micro,this.edits,this.details,this.dirty,this.passages,this.viewChunks]) index.clear();
   }

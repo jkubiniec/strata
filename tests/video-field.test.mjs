@@ -94,3 +94,28 @@ test('a desktop film still moves its own surface where two neighboring videos ou
     assert.notEqual(layer.uniforms.videoMap0.value,own.texture);
   }finally{field.dispose();atlas.dispose();}
 });
+
+test('the viewer reversibly reweights the playing films on the same hybrid surface',async()=>{
+  const entries=[0,15].map((x,id)=>({
+    id,frame:cameraStamp({eye:{x,y:5,z:0},aspect:1.6,fov:65}),
+    profile:{width:240,height:160,detail:.4,gridW:w,gridH:h,rgb:rgb(60+id*75),depth:new Float32Array(w*h).fill(.4),skyMask:new Uint8Array(w*h),
+      video:{id:'clip'+id,duration:3,width:240,height:160,gridW:w,gridH:h,frames:[frame(0,100,50+id*100),frame(1,120,100+id*25)]}}
+  }));
+  const atlas=new ViewVolumeAtlas(phoneBudget),field=new VideoField();
+  try{
+    await atlas.restore(entries);
+    const layer=atlas.stamps[0].layer,uniforms=layer.uniforms;
+    const gainsAt=x=>{
+      field.update(atlas,{position:{x,y:5,z:0}});
+      return layer.videoSamples.map(sample=>{
+        const slot=uniforms.videoMap0.value===sample.texture?0:1;
+        return uniforms['videoGain'+slot].value;
+      });
+    };
+    const left=gainsAt(0),middle=gainsAt(7.5),right=gainsAt(15);
+    assert.ok(left[0]>left[1]*8 && right[1]>right[0]*8);
+    assert.ok(Math.abs(middle[0]-middle[1])<1e-6);
+    assert.deepEqual(gainsAt(0),left);
+    assert.equal(layer.gaussian.material.uniforms,layer.solid.material.uniforms);
+  }finally{field.dispose();atlas.dispose();}
+});

@@ -4,7 +4,7 @@ import { BLOCKS } from './world.js';
 import { analyzeImage, detectObjects } from './vision.js';
 import { icons, cubeIcon, depthImage, openDatabase, readStore, writeStore, withStorableMedia } from './interface.js';
 
-import { describePose, heading, placementColor, placementMap } from './placements.js';
+import { describePose, heading, placementColor, mountPlacementMap } from './placements.js';
 import { expressProfile, importPixels, sourceBlob } from './photo-assets.js';
 import { isVideoFile, prepareVideo } from './video-source.js';
 import {loadHistory} from './history-atlas.js';
@@ -21,6 +21,7 @@ const requestedDemo=demo?(params.get('demo')||'computer'):null;
 const walkDemo=requestedDemo==='walk';
 const autoDemo=['autowalk','computer','phone'].includes(requestedDemo);
 const videoDemo=requestedDemo==='video';
+const filmFlight=requestedDemo==='flight';
 const completedWalk=walkDemo&&params.get('complete')==='1';
 const overlapStudy=completedWalk&&!!params.get('overlap');
 const seed=params.get('seed')||crypto.getRandomValues(new Uint32Array(1))[0].toString(36);
@@ -29,7 +30,7 @@ let walkOrigin,walkIndex=1,walkRetryAt=0,walkAutomatic=true;
 const atlas=[], views=[], settings={mode:'hybrid',opacity:65,fov:65};
 let game,db,library,ready=false,busy=false,playing=false,region=0,latestStats=null,selected=0,inspectedURL;
 let pendingPlacement=null, visibleKey='', selectedViewId=null;
-let noticeTimer,saveTimer,saveFailed=false,clearTouchPad;
+let noticeTimer,saveTimer,saveFailed=false,clearTouchPad,disposeMap;
 const clipViews=new Map();
 let controlClip=null;
 const exampleBank=[], savedBankSources=new Set();
@@ -46,7 +47,7 @@ function setLoading(message){
   else{$('load-label').textContent=message;$('load').hidden=false;}
 }
 function buttons(){
-  for(const id of ['play','turn-left','turn-right'])$(id).disabled=!ready;
+  for(const id of ['play','turn-left','turn-right','view-atlas'])$(id).disabled=!ready;
   for(const id of ['add-photo','path-action','replay-placement'])$(id).disabled=busy||!ready;
   renderBank();
 }
@@ -103,7 +104,8 @@ function saveSettings(){
   if(!ready||!library||saveFailed)return;
   const clipTimes={};
   for(const id of clipViews.keys())clipTimes[id]=game.videoField.time(id);
-  const state={...settings,selectedViewId,sampleAutomatic,walkAutomatic,clipTimes,clipsPlaying:game.videoField.playing,player:game.saveState()};
+  const preferredViewId=views[game.viewAtlas.preferredCapture]?.id;
+  const state={...settings,selectedViewId,preferredViewId,sampleAutomatic,walkAutomatic,clipTimes,clipsPlaying:game.videoField.playing,player:game.saveState()};
   writeStore(library,'settings',state,'session').catch(()=>{saveFailed=true;setSaved('Session only');notice('Browser storage is full or unavailable. This session is still playable.');});
 }
 function queueSave(){clearTimeout(saveTimer);saveTimer=setTimeout(saveSettings,220);}
@@ -170,7 +172,11 @@ function toggleClips(){
 }
 function updateViewHUD(s){
   const indices=(s?.viewBlend?.indices||[]).filter(i=>views[i]);
-  const key=indices.join(',')+'/'+views.length;
+  const preferred=game?.viewAtlas.preferredCapture, capture=views[preferred]?.capture;
+  const eye=game?.camera.position;
+  const recalled=capture&&game.recalledAspect===capture.aspect&&Math.abs(game.yaw-capture.yaw)<.00001&&
+    Math.abs(game.pitch-capture.pitch)<.00001&&Math.hypot(eye.x-capture.eye.x,eye.y-capture.eye.y,eye.z-capture.eye.z)<.001;
+  const key=indices.join(',')+'/'+views.length+'/'+(recalled?preferred:'');
   if(visibleKey!==key){
     visibleKey=key;
     const media=indices.some(i=>views[i].profile.video);
@@ -180,12 +186,12 @@ function updateViewHUD(s){
       const img=document.createElement('img');img.src=views[i].thumb;img.alt='';img.style.borderColor=placementColor(i);return img;
     }));
     $('view-mix').title=indices.length?indices.map(i=>views[i].title).join(' · '):'Look toward a placed photo or add one here';
-    $('region-no').textContent=indices.length>1?'OVERLAPPING VIEWS':indices.length?'CAPTURED VIEW':'WORLD';
+    $('region-no').textContent=recalled?'ORIGINAL VIEW':indices.length>1?'OVERLAPPING VIEWS':indices.length?'CAPTURED VIEW':'WORLD';
   }
   const weights=s?.viewBlend?.weights||[];
   [...$('mix-meter').children].forEach((el,i)=>{const width=((weights[i]??0)*100).toFixed(1)+'%';if(el.style.width!==width)el.style.width=width;});
   const active=views[s?.viewBlend?.dominant]||views[indices[0]];
-  const title=indices.length>1?'Blended landscape':active?.title||'Open landscape';
+  const title=recalled?views[preferred].title:indices.length>1?'Blended landscape':active?.title||'Open landscape';
   if($('world-title').textContent!==title)$('world-title').textContent=title;
 }
 function onStats(s){
@@ -272,6 +278,7 @@ function applySettings(){
   $('intensity').value=settings.opacity;$('intensity').style.setProperty('--p',settings.opacity+'%');$('intensity-out').textContent=settings.opacity+'%';$('intensity').disabled=settings.mode==='voxel';
 }
 function pop(kicker,title){
+  disposeMap?.();disposeMap=null;
   game?.pause();$('modal-kicker').textContent=kicker;$('modal-title').textContent=title;$('modal-body').replaceChildren();
   if(!$('modal').open)$('modal').showModal();syncSuspension();return $('modal-body');
 }
@@ -319,7 +326,7 @@ function inspectImage(which='photo'){
 }
 function showControls(){
   const b=pop('FIELD GUIDE','Controls');
-  const actions=[['Walk',['W','A','S','D']],['Look around',['Mouse','I','J','K','L']],['Jump / ascend in flight',['Space']],['Sprint',['Shift']],['Toggle flight',['F','2× Space']],['Descend in flight',['Q']],['Mine / place block',['Left / E','Right / R']],['Select material',['1–7','Wheel']],['Pick targeted block',['Middle click']],['Place next bank item',['B']],['Start / stop cycling',['G']],['Choose a photo or video',['U']],['Release mouse / pause',['Esc']]];
+  const actions=[['Walk',['W','A','S','D']],['Look around',['Mouse','I','J','K','L']],['Jump / ascend in flight',['Space']],['Sprint',['Shift']],['Toggle flight',['F','2× Space']],['Open placement sitemap',['M']],['Descend in flight',['Q']],['Mine / place block',['Left / E','Right / R']],['Select material',['1–7','Wheel']],['Pick targeted block',['Middle click']],['Place next bank item',['B']],['Start / stop cycling',['G']],['Choose a photo or video',['U']],['Release mouse / pause',['Esc']]];
   const list=document.createElement('dl');list.className='key-list';
   for(const [name,keys] of actions){const dt=document.createElement('dt');dt.textContent=name;const dd=document.createElement('dd');keys.forEach(key=>{const k=document.createElement('kbd');k.textContent=key;dd.append(k,' ');});list.append(dt,dd);}
   b.append(list);const p=document.createElement('p');p.textContent='On a phone, tap Import & walk to choose photos and videos together. Hold or slide across the arrows to walk. Tap Stop cycling to explore, or Start cycling to place more media. Pause video controls film playback separately.';b.append(p);
@@ -336,7 +343,7 @@ function showNotes(){
     <h3>Placing photos and video</h3>
     <p>The media bank prepares your selection on this device. Walk 12 blocks or turn 35° to place the next ready item in the direction you are facing. Start cycling and Stop cycling control that rotation. A placed video has its own clock. Its moving depth field shifts blocks and splats, even when you stand still. Use Video playback to pause or scrub it.</p>
     <h3>Blending shared space</h3>
-    <p>Step toward a photo’s capture point and matching blocks and Gaussian splats shift toward its shapes and colors. Retrace your steps to reverse the change. Block faces stay aligned with the world axes, and blocks within building reach stay on the collision grid. Photo atlas recalls any saved viewpoint.</p>
+    <p>Step toward a photo’s capture point and matching blocks and Gaussian splats shift toward its shapes and colors. Retrace your steps to reverse the change. Block faces stay aligned with the world axes, and blocks within building reach stay on the collision grid. Use the sitemap to return to any saved viewpoint.</p>
     <h3>Exploring beyond the camera</h3>
     <p>The photograph supplies the visible appearance. Voxel terrain and scene-specific rules supply solid ground and plausible hidden faces. The inspector lets you isolate the voxels or splats and inspect the estimated depth. All photo analysis runs on this device.</p>
     <h3>Walkthrough photographs</h3>
@@ -346,22 +353,56 @@ function showNotes(){
     <p class="notes-source">Anisotropic splats carry light and color. Cross-image feature matches guide the shape change. <a href="https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/" target="_blank" rel="noreferrer">3D Gaussian Splatting</a> · <a href="https://arxiv.org/abs/1705.01088" target="_blank" rel="noreferrer">Deep Image Analogy</a></p>`;
 }
 function showAtlas(){
-  const b=pop('PHOTO ATLAS',views.length+' placed view'+(views.length===1?'':'s'));
+  if(!ready||!game)return;
+  const b=pop('WORLD NAVIGATION','Placement sitemap');
   $('view-atlas').classList.add('active');$('view-world').classList.remove('active');
-  const grid=document.createElement('div');grid.className='region-atlas';
-  views.forEach((r,i)=>{
-    const row=document.createElement('button');row.className='atlas-row';row.title='Return to the captured view for '+r.title;
-    const img=document.createElement('img');img.src=r.thumb;img.alt='';
+  const records=views.slice(),all=records.map((_,i)=>i);
+  const map=document.createElement('div'),grid=document.createElement('div');grid.className='region-atlas';
+  const hint=document.createElement('p');hint.className='map-instructions';
+  hint.textContent='Select a pin to return to its camera. Pins marked × contain several views.';
+  const toolbar=document.createElement('div');toolbar.className='map-search';
+  const search=document.createElement('input');search.type='search';search.placeholder='Find a placement';
+  search.setAttribute('aria-label','Find a placement by title, file name or view number');
+  const reset=document.createElement('button');reset.type='button';reset.textContent='All placements';reset.hidden=true;
+  const status=document.createElement('p');status.className='map-count';status.setAttribute('role','status');
+  toolbar.append(search,reset);b.append(hint,map,toolbar,status,grid);
+  function visit(i){
+    closeModal();game.goToStamp(i);displayRegion(i);saveSettings();
+  }
+  function rowFor(i){
+    const r=records[i],row=document.createElement('button');row.type='button';row.className='atlas-row';row.title='Return to '+r.title;
+    const img=document.createElement('img');img.loading='lazy';img.decoding='async';img.src=r.thumb;img.alt='';
     const labels=document.createElement('div'),no=document.createElement('span'),name=document.createElement('strong'),pose=document.createElement('small');
-    const seen=latestStats?.viewBlend, slot=seen?.indices?.indexOf(i)??-1;
-    const share=slot<0?'':Math.max(1,Math.round(100*(seen.weights?.[slot]??0)))+'% in view';
-    no.className='atlas-no';no.style.color=placementColor(i);no.textContent='VIEW '+pad(i+1)+' · '+heading(r.capture.yaw)+(share?' · '+share:'');
-    name.textContent=r.title;pose.textContent=r.name+' · '+Math.round(180*r.capture.pitch/Math.PI)+'° pitch';labels.append(no,name,pose);
-    const arr=document.createElement('i');arr.dataset.icon='forward';row.append(img,labels,arr);
-    row.onclick=()=>{closeModal();game.goToStamp(i);displayRegion(i);saveSettings();};grid.append(row);
+    const seen=latestStats?.viewBlend,slot=seen?.indices?.indexOf(i)??-1;
+    const share=slot<0?'':' · '+Math.max(1,Math.round(100*(seen.weights?.[slot]??0)))+'% in view';
+    no.className='atlas-no';no.style.color=placementColor(i);
+    no.textContent='VIEW '+pad(i+1)+' · '+(r.profile.video?'VIDEO':'PHOTO')+share;
+    const {x,y,z}=r.capture.eye;
+    name.textContent=r.title;pose.textContent=describePose(r.capture)+' · XYZ '+[x,y,z].map(v=>Math.round(v*10)/10).join(' / ');
+    labels.append(no,name,pose);
+    const arr=document.createElement('span');arr.className='map-row-arrow';arr.setAttribute('aria-hidden','true');arr.textContent='→';
+    row.append(img,labels,arr);row.onclick=()=>visit(i);return row;
+  }
+  let subset=all,matches=[],shown=0;
+  const more=document.createElement('button');more.type='button';more.className='sample-path';more.textContent='Show more placements';
+  function appendRows(){
+    const next=matches.slice(shown,shown+40);grid.append(...next.map(rowFor));shown+=next.length;
+    more.hidden=shown>=matches.length;
+  }
+  function filter(){
+    const term=search.value.trim().toLowerCase();
+    matches=subset.filter(i=>!term || [String(i+1),pad(i+1)].includes(term) || (records[i].title+' '+records[i].name).toLowerCase().includes(term));
+    status.textContent=matches.length+' placement'+(matches.length===1?'':'s')+(subset===all?'':' at this spot');
+    grid.replaceChildren();shown=0;appendRows();
+  }
+  search.oninput=filter;more.onclick=appendRows;
+  reset.onclick=()=>{subset=all;reset.hidden=true;search.value='';filter();search.focus();};
+  b.append(more);filter();
+  disposeMap=mountPlacementMap(map,records,game.captureView(),indices=>{
+    if(indices.length===1){visit(indices[0]);return;}
+    subset=indices;search.value='';reset.hidden=false;filter();grid.firstElementChild?.focus();
   });
-  b.append(placementMap(views,game.captureView()),grid);
-  const add=document.createElement('button');add.className='primary atlas-add';add.textContent='+  Add photo here';add.disabled=!ready||busy;add.onclick=requestPhoto;b.append(add);icons(b);
+  const add=document.createElement('button');add.className='primary atlas-add';add.textContent='+  Place media here';add.disabled=!ready||busy;add.onclick=requestPhoto;b.append(add);icons(b);
 }
 function requestPhoto(){
   if(demo){placeBankPhoto();return;}
@@ -497,7 +538,7 @@ async function addFile(file,placement){
   if(record){const saved=persistView(record);saveSettings();await saved;}
 }
 function updatePathAction(){
-  const btn=$('path-action');btn.querySelector('span').textContent=views.length>1?'View placements':'Try overlapping views';
+  const btn=$('path-action');btn.querySelector('span').textContent=views.length>1?'Open sitemap':'Try overlapping views';
   btn.title=views.length>1?'See captured camera positions and overlapping views':'Open a separate three-photo example';
   $('replay-placement').hidden=!game?.canReplayPlacement;
 }
@@ -511,7 +552,7 @@ function wire(){
   $('history-browser')?.addEventListener('click',showHistory);
   $('enlarge').onclick=()=>inspectImage();$('vision-info').onclick=()=>inspectImage('vision');$('close-modal').onclick=closeModal;
   $('modal').addEventListener('click',e=>{if(e.target===$('modal')){const b=$('modal').getBoundingClientRect();if(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)closeModal();}});
-  $('modal').onclose=()=>{if(inspectedURL){URL.revokeObjectURL(inspectedURL);inspectedURL=null;}syncSuspension();$('view-atlas').classList.remove('active');$('view-world').classList.add('active');};
+  $('modal').onclose=()=>{disposeMap?.();disposeMap=null;if(inspectedURL){URL.revokeObjectURL(inspectedURL);inspectedURL=null;}syncSuspension();$('view-atlas').classList.remove('active');$('view-world').classList.add('active');};
   $('add-photo').onclick=requestPhoto;$('file').onchange=()=>addFile($('file').files[0],pendingPlacement);
   function chooseBank(startWalking){
     if(demo){location.assign('./?world=mine');return;}
@@ -552,6 +593,7 @@ function wire(){
   $('intensity').oninput=()=>{settings.opacity=+$('intensity').value;if(game)applySettings();queueSave();};
   window.addEventListener('keydown',e=>{
     if(e.repeat||$('modal').open||e.ctrlKey||e.metaKey||e.altKey||e.target?.isContentEditable)return;
+    if(e.code==='KeyM'&&ready&&!e.target?.closest?.('input,textarea,select')){e.preventDefault();showAtlas();return;}
     if(e.code==='KeyB'){e.preventDefault();placeBankPhoto();}
     if(e.code==='KeyG'&&ready&&(exampleBank.length||bank.items.length)&&!e.target?.closest?.('input,textarea,select')){
       e.preventDefault();setAutomatic(!automaticEnabled());
@@ -586,8 +628,10 @@ async function start(){
     if(records[0]&&!records[0].historyId&&!records[0].profile.imageBlob&&!records[0].profile.video){
       const first=records[0];Object.assign(first,await historicalStarter());await persistRegion(first,true);
     }
+    const flight=filmFlight?await import('./film-scene.js'):null;
+    const flightFilms=flight?await flight.loadFlightFilms():null;
     if(!records.length){
-      const r=videoDemo?{id:0,name:'express.mp4',title:'New Black Diamond Express',thumb:'./assets/express.jpg',profile:await expressProfile()}:await historicalStarter();
+      const r=flightFilms?flightFilms[0]:videoDemo?{id:0,name:'express.mp4',title:'New Black Diamond Express',thumb:'./assets/express.jpg',profile:await expressProfile()}:await historicalStarter();
       setLoading('Building '+r.title+'…');await new Promise(resolve=>setTimeout(resolve,0));r.anchor=await game.addRegion(r.profile);atlas.push(r);await persistRegion(r);
     }else{
       for(const r of records){
@@ -607,11 +651,15 @@ async function start(){
     const legacyViews=atlas.map((r,i)=>{
       game.goTo(i);
       let capture=game.captureView();
+      if(flightFilms)capture=flight.flightCapture(capture,r,0);
       if(videoDemo&&i===0){const y=capture.y+7;capture={...capture,y,eye:{...capture.eye,y}};}
       return {...r,id:'region-'+r.id,capture};
     });
     game.goTo(0);
-    if(isMobileRenderer())game.beginViewRestore();
+    if(flightFilms){
+      const r=flightFilms[1];r.capture=flight.flightCapture(game.captureView(),r,1);storedViews.push(r);
+    }
+    if(isMobileRenderer()||filmFlight)game.beginViewRestore();
     for(const [i,r] of legacyViews.entries())await installView(r,{reference:i===0,animate:false});
     walkOrigin=legacyViews[0].capture;
     if(requestedDemo==='views'||requestedDemo==='morph'){
@@ -638,8 +686,8 @@ async function start(){
         await persistView(record);
       }
     }
-    if(isMobileRenderer())await game.finishViewRestore();
-    Object.assign(settings,{mode:saved?.mode||'hybrid',opacity:saved?.opacity??65,fov:saved?.fov||legacyViews[0].capture.fov});
+    if(isMobileRenderer()||filmFlight)await game.finishViewRestore();
+    Object.assign(settings,{mode:saved?.mode||'hybrid',opacity:saved?.opacity??(filmFlight?82:65),fov:saved?.fov||legacyViews[0].capture.fov});
     if(typeof saved?.sampleAutomatic==='boolean')sampleAutomatic=saved.sampleAutomatic;
     if(typeof saved?.walkAutomatic==='boolean')walkAutomatic=saved.walkAutomatic;
     if(saved?.clipsPlaying===false)game.videoField.setPlaying(false);
@@ -647,8 +695,14 @@ async function start(){
       if(clipViews.has(id)&&Number.isFinite(time))game.videoField.seek(id,time);
     }
     applySettings();
-    if(saved?.player)game.restoreState(saved.player);
+    if(saved?.player){
+      const id=saved.preferredViewId??(saved.player.viewAspect?saved.selectedViewId:null);
+      const preferred=views.findIndex(view=>view.id===id);
+      if(preferred>=0)game.viewAtlas.preferredCapture=preferred;
+      game.restoreState(saved.player);
+    }
     else if(walkDemo)game.turnView(Math.atan2(walkStops[1].x,-walkStops[1].z));
+    else if(filmFlight){game.flying=true;game.goToStamp(0);}
     else if(videoDemo)game.goToStamp(0);
     else if(requestedDemo==='views'||requestedDemo==='morph')game.turnView(22*Math.PI/180);
     let selectedIndex=views.findIndex(v=>v.id===saved?.selectedViewId);
@@ -659,16 +713,23 @@ async function start(){
         game.turnView(49*Math.PI/180-game.yaw,Math.PI/180-game.pitch);
       }
     }
-    displayRegion(selectedIndex>=0?selectedIndex:demo&&!walkDemo?Math.min(1,views.length-1):0);updateViewHUD(latestStats);
+    displayRegion(selectedIndex>=0?selectedIndex:demo&&!walkDemo&&!filmFlight?Math.min(1,views.length-1):0);updateViewHUD(latestStats);
     ready=true;busy=false;syncSuspension();buttons();updatePathAction();$('load').hidden=true;$('connection').textContent='World ready';
     if(demo){
-      $('demo-back').hidden=false;setSaved('Public atlas');offerArchive();
+      $('demo-back').hidden=false;setSaved('Public atlas');
+      if(filmFlight){exampleBank.splice(0,exampleBank.length,...views);renderBank();}
+      else offerArchive();
       if(autoDemo)$('auto-link').hidden=true;
-      if(videoDemo)$('film-link').hidden=true;
+      if(filmFlight)$('film-link').hidden=true;
       document.querySelector('.entry-hint').textContent=videoDemo?'The train moves as you watch · Enter to explore':'Walk or turn to place the next historical image';
     }
+    if(filmFlight){
+      document.body.classList.add('film-demo');
+      flight.watchFlight(game,$('watch-flight'),$('stop-flight'),displayRegion);
+      document.querySelector('.entry-hint').textContent='Fly freely or watch the two-film transition';
+    }
     if(walkDemo){
-      document.querySelector('.entry-hint').textContent=walkIndex<walkStops.length?'Walk toward the next photo · Select its waypoint to jump there':'Explore 11 photos · Photo atlas recalls any viewpoint';
+      document.querySelector('.entry-hint').textContent=walkIndex<walkStops.length?'Walk toward the next photo · Select its waypoint to jump there':'Explore 11 photos · Sitemap recalls any viewpoint';
       if(overlapStudy)document.querySelector('.entry-hint').textContent='Walk forward into the overlap, then back to reverse the morph';
       if(latestStats)trackWalk(latestStats);
     }

@@ -182,3 +182,14 @@ test('multiple photos from the same pose can be traversed by walking along the c
     assert.equal(sample(0),start);
   }finally{atlas.dispose();}
 });
+
+test('the previous film retains its feature match when an older overlapping capture has a closer heading',()=>{
+  const atlas=new ViewVolumeAtlas(),records=[];
+  try{
+    for(const [id,yaw] of [0,.30,.04].entries()){
+      records.push(atlas.prepareRecord(source([80+id*14,110,160]),frame(yaw),id,records));
+    }
+    assert.deepEqual([...records[2].flows.keys()].sort(),[0,1]);
+    assert.ok(records[1].flows.has(2));
+  }finally{atlas.dispose();}
+});

@@ -3,6 +3,7 @@
 // a camera or to a pair of successive images.
 import * as THREE from './vendor/three.module.js';
 import { desktopBudget } from './performance-profile.js';
+import {projectionUniforms,surfaceProjectionGL} from './terrain-projection.js';
 import { photoDistance } from './world.js';
 import { fuseAppearance } from './photo-fusion.js?v=3.5';
 import { beginFusion } from './fusion-task.js';
@@ -160,7 +161,7 @@ function makeRayGrid(r) {
         uvWarp(flow,rootUV.u,rootUV.v,mapped);
         const du=clamp(mapped.u-q.su,-.31,.31),dv=clamp(mapped.v-q.sv,-.31,.31);
         const interior=smooth(0,.12,Math.min(q.u,1-q.u,q.v,1-q.v))*smooth(0,.12,Math.min(u,1-u,v,1-v));
-        const slip=.76*interior;
+        const slip=interior;
         shadeU+=du*slip*q.w/sum;shadeV+=dv*slip*q.w/sum;
         q.su=clamp(q.su+du*slip*probes[0].w/sum);q.sv=clamp(q.sv+dv*slip*probes[0].w/sum);
       }
@@ -197,7 +198,7 @@ export function computePhotoSamples(record){
 }
 const transitionVertex=videoVertexGL+`
   attribute vec3 startCenter;attribute vec4 startPigment;
-  uniform float placement,hasPhotoMotion;
+  uniform float placement,hasPhotoMotion,hybridCore;
   uniform vec3 eye,forward,across,upAxis,observerEye;
   uniform vec2 aperture,offset,motionSize;
   uniform sampler2D motionOffsets,motionPigment;
@@ -239,7 +240,7 @@ const vsCubes=transitionVertex+`
       if(signs.x*signs.y*signs.z<0.){corner=corner.zyx;norm=norm.zyx;}
       corner*=signs;norm*=signs;
     #endif
-    restPoint=centerP+corner;worldP=restPoint+shift;
+    restPoint=centerP+corner*hybridCore;worldP=restPoint+shift;
     gl_Position=projectionMatrix*viewMatrix*vec4(worldP,1.);
   }`;
 const projectionGL=`
@@ -265,7 +266,7 @@ const transitionFragment=`
   }
   vec3 transportedColor(vec3 c){float blend=movement>.5?smoothstep(.02,.93,placement):1.;return mix(initialPigment.rgb,c,blend);}
 `;
-const fsCubes=videoFragmentGL+projectionGL+transitionFragment+`
+const fsCubes=videoFragmentGL+projectionGL+surfaceProjectionGL+transitionFragment+`
   uniform float materialGrain;
   varying vec3 worldP,centerP,norm;
   void main(){
@@ -275,8 +276,9 @@ const fsCubes=videoFragmentGL+projectionGL+transitionFragment+`
     float facet=clamp(materialGrain+sampleColor.a*.40+.23*smoothstep(1.,9.,length(cameraPosition-eye)),0.,.95);
     vec3 pigment=texture2D(radiance,clamp(photoCoords(centerP).xy,0.,1.)).rgb;
     float shade=norm.y>.5?1.10:norm.y<-.5?.65:abs(norm.x)>.5?.76:.99;
-    vec3 movie=videoColorDelta(mix(uvz.xy,photoCoords(centerP).xy,facet))*placement;
-    gl_FragColor=vec4(transportedColor(clamp(mix(color,pigment,facet)+motionColor+movie,0.,1.)*mix(1.,shade,facet)),1.);
+    vec3 live=videoRadiance(mix(uvz.xy,photoCoords(centerP).xy,facet),mix(color,pigment,facet)+motionColor,placement);
+    live=projectSurface(worldP,clamp(live,0.,1.)*mix(1.,shade,facet));
+    gl_FragColor=vec4(transportedColor(live),1.);
     #include <colorspace_fragment>
   }`;
 const vsSurfels=transitionVertex+`
@@ -289,7 +291,7 @@ const vsSurfels=transitionVertex+`
     worldP=restPoint+travel(surfacePoint);
     gl_Position=projectionMatrix*viewMatrix*vec4(worldP,1.);
   }`;
-const fsSurfels=videoFragmentGL+projectionGL+transitionFragment+`
+const fsSurfels=videoFragmentGL+projectionGL+surfaceProjectionGL+transitionFragment+`
   uniform float splatOpacity;
   varying vec2 kernel;varying vec3 worldP;
   void main(){
@@ -297,12 +299,13 @@ const fsSurfels=videoFragmentGL+projectionGL+transitionFragment+`
     if(outside(photoCoords(worldP)))discard;vec3 uvz=photoCoords(restPoint);
     vec4 sampleColor=texture2D(radiance,uvz.xy);vec3 color=sampleColor.rgb;
     float vis=visibility(worldP);if(vis<.001)discard;
-    gl_FragColor=vec4(transportedColor(clamp(color+motionColor+videoColorDelta(uvz.xy)*placement,0.,1.)),vis*splatOpacity*(1.-.29*sampleColor.a)*exp(-.5*radius));
+    vec3 live=projectSurface(worldP,clamp(videoRadiance(uvz.xy,color+motionColor,placement),0.,1.));
+    gl_FragColor=vec4(transportedColor(live),vis*splatOpacity*exp(-.5*radius));
     #include <colorspace_fragment>
   }`;
-function uniforms(r,tex,motion){
+function uniforms(r,tex,motion,projection){
   const s=r.s;
-  return {hasPhotoMotion:{value:motion?1:0},motionOffsets:{value:motion?.offsets||zeroMotionTexture},
+  return {...projection,hybridCore:{value:1},hasPhotoMotion:{value:motion?1:0},motionOffsets:{value:motion?.offsets||zeroMotionTexture},
     motionPigment:{value:motion?.pigment||zeroMotionTexture},motionSize:{value:motion?.dimensions||new THREE.Vector2(1,1)},
     observerEye:{value:new THREE.Vector3()},placement:{value:1},retiring:{value:0},retirePhase:{value:0},replaying:{value:0},...stampUniforms(s),eye:{value:new THREE.Vector3(s.x,s.y,s.z)},forward:{value:new THREE.Vector3(s.dx,s.dy,s.dz)},
     across:{value:new THREE.Vector3(s.rx,s.ry,s.rz)},upAxis:{value:new THREE.Vector3(s.ux,s.uy,s.uz)},
@@ -391,7 +394,7 @@ async function buildLayer(r,g,atlas,active,animate,image) {
     if(!g.owned[k])continue;
     back(s,u,v,d,p);
     const near=Math.max(0,d*.002);
-    back(s,u,v,Math.max(s.near,d-near-.48),q);
+    back(s,u,v,Math.max(s.near,d-near-.76),q);
     const shift=.52,dx=g.depths[k+1]-d,dy=g.depths[k+g.w+1]-d;
     const sw=d*s.slopeX/g.w,sh=d*s.slopeY/g.h;
     const tu=clamp(dx,-sw,sw)*shift,tv=clamp(dy,-sh,sh)*shift;
@@ -436,7 +439,7 @@ async function buildLayer(r,g,atlas,active,animate,image) {
   }
   const motion=buildPhotoMotion(r,g,back,rawDepth);
   const video=videoSamples(g),defines={STRATA_VIDEO_SLOTS:Math.min(2,video.length)};
-  const uniformsUv=uniforms(r,tex,motion);uniformsUv.placement.value=animate?0:1;
+  const uniformsUv=uniforms(r,tex,motion,atlas.projection);uniformsUv.placement.value=animate?0:1;
   Object.assign(uniformsUv,videoUniforms(video.length));
   const compact=r.budget.rayScale<1;
   const solid=new THREE.Mesh(instanced(compact?facingBox:box,{cellCenter:coords,startCenter:starts,startPigment:pigments},cells.size),
@@ -453,7 +456,7 @@ async function buildLayer(r,g,atlas,active,animate,image) {
   const corners=[];for(const depth of [s.near,Math.min(MAX_DEPTH+4,s.far)])for(const v of [0,1])for(const u of [0,1]){
     const k=back(s,u,v,depth,{});corners.push(new THREE.Vector3(k.x,k.y,k.z));
   }
-  const layer={root,solid,gaussian,cells,motion,videoSamples:video,ownVideoSample:video.find(sample=>sample.record===r),texture:tex,uniforms:uniformsUv,image,bounds,corners,resident:true,lod:0,overlap:r.neighbors.length>0,
+  const layer={root,solid,gaussian,cells,motion,videoSamples:video,videoObservers:g.neighbors||[],ownVideoSample:video.find(sample=>sample.record===r),texture:tex,uniforms:uniformsUv,image,bounds,corners,resident:true,lod:0,overlap:r.neighbors.length>0,
     depths:g.depths,w:g.w,h:g.h,dispose(){for(const item of video)item.texture.dispose();motion?.dispose();tex.dispose();solid.material.dispose();gaussian.material.dispose();solid.geometry.dispose();gaussian.geometry.dispose();}};
   changeUniforms(layer,active.s);return layer;
 }
@@ -482,8 +485,8 @@ function retainGpu(layer,lod){
   layer.resident=true;layer.lod=lod;
 }
 export class ViewVolumeAtlas {
-  constructor(budget=desktopBudget){
-    this.budget=budget;
+  constructor(budget=desktopBudget,projection=projectionUniforms()){
+    this.budget=budget;this.projection=projection;
     this.mesh=new THREE.Group();this.mesh.name='World-space photo stamps';this.stamps=[];this.records=this.stamps;
     this.masked=new Set();this.cells=new Map();this.sections=new Map();this.lastSection=null;this.lastKey='';
     this.query={};this.transitionProgress=1;this.animating=false;this.retiring=[];this.transitionLayers=[];this.lastPlacement=null;
@@ -525,14 +528,15 @@ export class ViewVolumeAtlas {
     const cameraKeys=['x','y','z','dx','dy','dz','rx','ry','rz','ux','uy','uz','slopeX','slopeY','offsetX','offsetY','near','far'];
     const twin=neighbors.find(p=>cameraKeys.every(k=>Math.abs((p.s[k]||0)-(s[k]||0))<1e-7));
     r.representative=twin&&(twin.representative||twin);
-    // Learn feature transport for the most similar sight line. Every
-    // intersecting observation still contributes independent depth and color.
+    // Preserve the chain a player just placed, even if an older camera has
+    // a closer heading. At most two pairs need new feature matches per view.
     function similarity(p){return s.dx*p.s.dx+s.dy*p.s.dy+s.dz*p.s.dz-.005*Math.hypot(s.x-p.s.x,s.y-p.s.y,s.z-p.s.z);}
     const closest=neighbors.reduce((best,q)=>!best||similarity(q)>similarity(best)?q:best,null);
-    if(closest && similarity(closest)>.15){
-      r.flows.set(closest.id,correspondence(profile,closest.profile,25,19));
+    for(const other of new Set([closest,neighbors.at(-1)])){
+      if(!other || similarity(other)<=.15)continue;
+      r.flows.set(other.id,correspondence(profile,other.profile,25,19));
+      other.flows.set(r.id,correspondence(other.profile,profile,25,19));
     }
-    if(r.flows.size)closest.flows.set(r.id,correspondence(closest.profile,profile,25,19));
     for(const old of neighbors)old.neighbors.push(r);
     return r;
   }
@@ -746,8 +750,9 @@ export class ViewVolumeAtlas {
       retainGpu(l,lod);l.root.visible=true;
       if(c&&l.motion){l.motion.update(c.position);l.uniforms.observerEye.value.copy(c.position);}
       l.solid.visible=mode!=='splat';l.gaussian.visible=mode!=='voxel'&&splats>0;
-      l.uniforms.materialGrain.value=mode==='voxel'?.84:.14;
-      l.uniforms.splatOpacity.value=mode==='splat'?Math.min(.99,Math.max(.12,splats*1.5)):Math.min(.82,splats*.88);
+      l.uniforms.hybridCore.value=mode==='hybrid'?1-.28*splats:1;
+      l.uniforms.materialGrain.value=mode==='voxel'?.84:.19;
+      l.uniforms.splatOpacity.value=mode==='splat'?Math.min(.99,Math.max(.12,splats*1.5)):Math.min(.98,splats*1.48);
     }
   }
   maskCell(x,y,z){

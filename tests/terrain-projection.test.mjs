@@ -28,3 +28,21 @@ test('terrain samples the same offset camera rays as the stamp and releases them
   camera.position.x+=9;update();assert.equal(u.terrainSettings0.value.z,0);
   camera.position.x-=13;camera.rotateY(Math.PI);update();assert.equal(u.terrainSource0.value,null);
 });
+
+test('returning to one of two coincident camera poses projects its own moving frame across the shared surface',()=>{
+  const camera=new THREE.PerspectiveCamera(65,1.6,.07,400);
+  const s=captureStamp(camera),layer={resident:true,root:{visible:true},uniforms:{placement:{value:1}}};
+  const records=[0,1].map(id=>({id,s,profile:{video:{id}},layer,cropX:.9,cropY:1}));
+  records[1].representative=records[0];
+  records[1].layer={resident:false,root:{visible:false}};
+  const sources=new Map(records.map(({id})=>[id,{nativeReady:true,native:{texture:{id}}}]));
+  const projection=new TerrainProjection({}),atlas={stamps:records};
+  for(const id of [1,0,1]){
+    atlas.preferredCapture=id;projection.update(camera,atlas,{sources},'hybrid');
+    assert.equal(projection.uniforms.terrainSource0.value.id,id);
+    assert.equal(projection.uniforms.terrainSettings0.value.z,1);
+    assert.equal(projection.uniforms.terrainSettings0.value.x,.9);
+    assert.equal(projection.uniforms.terrainSettings1.value.z,0);
+  }
+  projection.dispose();
+});

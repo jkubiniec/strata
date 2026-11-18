@@ -23,11 +23,12 @@ export async function sampleProfile(name) {
 }
 
 
-export async function expressProfile() {
+export async function filmProfile(name) {
+  const stem='./assets/'+name;
   const [profile, study, response] = await Promise.all([
-    sampleProfile('express'), readStudy('./assets/express-motion.bin'), fetch('./assets/express.mp4')
+    sampleProfile(name), readStudy(stem+'-motion.bin'), fetch(stem+'.mp4')
   ]);
-  if (!response.ok) throw new Error('Could not open the train film.');
+  if (!response.ok) throw new Error('Could not open the film.');
   const {meta, buffer} = study;
   const n = meta.gridW * meta.gridH;
   let offset = study.offset;
@@ -40,6 +41,8 @@ export async function expressProfile() {
   profile.video = {...meta,frames,blob:await response.blob()};
   return profile;
 }
+
+export function expressProfile(){ return filmProfile('express'); }
 
 async function isPhoneHEIF(file) {
   if (/^image\/hei[cf](?:-sequence)?$/i.test(file.type) || /\.hei[cf]s?$/i.test(file.name)) return true;
