@@ -10,6 +10,7 @@ import { isMobileRenderer } from './performance-profile.js';
 import { WALK_STOPS, walkCapture, loadWalkProfile } from './walk-route.js';
 import { PhotoBank, WalkingPlacement, sameAutoView } from './photo-bank.js';
 import { prepareBankPreview, showBankPreview } from './bank-preview.js';
+import { bindTouchPad } from './touch-pad.js';
 
 const $=id=>document.getElementById(id);
 const requestedDemo=new URLSearchParams(location.search).get('demo');
@@ -22,7 +23,7 @@ let walkOrigin,walkIndex=1,walkRetryAt=0;
 const atlas=[], views=[], settings={mode:'hybrid',opacity:65,fov:65};
 let game,db,library,ready=false,busy=false,playing=false,region=0,latestStats=null,selected=0,inspectedURL;
 let pendingPlacement=null, visibleKey='', selectedViewId=null;
-let noticeTimer,saveTimer,saveFailed=false;
+let noticeTimer,saveTimer,saveFailed=false,clearTouchPad;
 const exampleBank=[], savedBankSources=new Set();
 let bankOpen=false,bankPlacements=0,lastBankTime=0;
 let sampleAutomatic=autoDemo||new URLSearchParams(location.search).get('auto')==='1',warmProfile,autoAfterPicker=false;
@@ -208,6 +209,7 @@ async function placeWalkStop(visit){
 }
 function playState(state){
   if(state)walkingPlacement.reset(movementPose());
+  else clearTouchPad?.();
   playing=state;document.body.classList.toggle('playing',state);if(state)$('inspector').classList.remove('open');if(!state)queueSave();
   $('connection').textContent=state?'Exploring':'World ready';
 }
@@ -463,7 +465,7 @@ function wire(){
     if(e.code==='KeyU'){e.preventDefault();requestPhoto();}
     if(e.code==='Escape')$('inspector').classList.remove('open');
   });
-  for(const el of document.querySelectorAll('#touch-pad [data-key]')){el.onpointerdown=e=>{e.preventDefault();el.setPointerCapture(e.pointerId);game.moveKey(el.dataset.key,true);};el.onlostpointercapture=()=>game.moveKey(el.dataset.key,false);}
+  clearTouchPad=bindTouchPad($('touch-pad'),(code,down,id)=>game?.moveKey(code,down,id));
   for(const el of document.querySelectorAll('#touch-pad [data-act]'))el.onclick=()=>{
     if(el.dataset.act==='bank')placeBankPhoto();
     else if(el.dataset.act==='photo')requestPhoto();

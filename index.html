@@ -7,11 +7,12 @@
 <meta name="description" content="Build and explore a continuous voxel and Gaussian splat world from your own photographs.">
 <title>Strata — Photo worlds</title>
 <link rel="icon" type="image/svg+xml" href="./assets/strata.svg">
-<link rel="stylesheet" href="./studio.css?v=3.5">
+<link rel="stylesheet" href="./studio.css?v=3.6">
 <script type="importmap">
 {
   "imports": {
-    "./game.js": "./game.js?v=3.5",
+    "./game.js": "./game.js?v=3.6",
+    "./touch-pad.js": "./touch-pad.js?v=3.6",
     "./world.js": "./world.js?v=3.5",
     "./vision.js": "./vision.js?v=3.5",
     "./morph.js": "./morph.js?v=3.5",
@@ -106,6 +107,6 @@
 <input type="file" accept="image/*" id="file" hidden>
 <input type="file" accept="image/*" id="bank-files" multiple hidden>
 <dialog id="modal"><div class="dialog-head"><div><div class="eyebrow" id="modal-kicker">STRATA</div><h2 id="modal-title"></h2></div><button id="close-modal" class="square" aria-label="Close dialog"><i data-icon="x"></i></button></div><div class="dialog-body" id="modal-body"></div></dialog>
-<script type="module" src="./studio.js?v=3.5"></script>
+<script type="module" src="./studio.js?v=3.6"></script>
 </body>
 </html>

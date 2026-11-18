@@ -99,6 +99,8 @@ dialog:has(.guide-editor){width:min(830px,calc(100% - 28px))}
   #auto-hud[aria-checked=true] #auto-mode{color:var(--acid)}#auto-ready{font-size:9px;color:#c9d4c4}
   .bank-actions .sample-path,.bank-switch{min-height:44px}
   #touch-pad button{min-width:42px;height:44px}.dpad{grid-template-columns:repeat(3,42px)}
+  #touch-pad{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+  #touch-pad button.held{color:var(--acid);border-color:var(--acid);background:#27341ee6}
   .playing #touch-pad{left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right))}
 }
 @media(pointer:coarse) and (max-height:550px){
