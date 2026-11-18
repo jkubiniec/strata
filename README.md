@@ -8,6 +8,18 @@ Walk into a photograph, turn a few degrees, and place another one. Where the two
 
 Both arcade demos draw from **69 historical images**. One visit might take you from an eruption above the Bay of Naples to a snowbound Colorado railway. The in-game **Historical atlas** gives the date, caption, credit and original collection record for every image. The public worlds start fresh and never open the browser’s personal media database. To import your own photos and videos, enter **My media world**. [Browse all 69 sources](docs/historical-atlas.md) · [Open My media world](https://jkubiniec.github.io/strata/?world=mine)
 
+## Fly around a playing film
+
+![Flying sideways and upward around a playing steam-train film in Strata’s hybrid voxel and splat world.](docs/media/video-flight.gif)
+
+The locomotive first appears head-on. The player flies 26 blocks to the right and climbs 10, turning to keep the train in view. Watch the railroad sign shift against the distant trees. The smaller panel shows the same instant in the original film. The film is *New Black Diamond Express*, recorded by the Edison Manufacturing Co. in 1900. [Enter the train scene](https://jkubiniec.github.io/strata/?demo=video) · [Library of Congress film record](https://www.loc.gov/item/00694259/)
+
+![A close flight past the train in Voxels mode, ending with the camera hovering while the film continues to animate the block faces.](docs/media/video-voxels.gif)
+
+The close pass goes left and climbs nearly seven blocks. For the last four seconds, the camera hovers at the same spot. Watch the white steam spread across the square faces as the locomotive advances underneath it.
+
+To try it on a computer, choose **Enter world** and press **F** to fly. Hold **D** to move sideways and **Space** to climb, then turn the mouse back toward the locomotive. Choose **Voxels** in the inspector to see the individual blocks. **Pause video** freezes the film at the current frame so you can fly around that instant.
+
 ## Walk through the atlas
 
 ![A first-person walk that adds historical images at successive positions and angles.](docs/media/historical-walk.gif)
@@ -29,12 +41,6 @@ Walking 12 blocks or turning 35° places the next ready image inside the current
 ![Walking into an overlap and retracing the path after eleven historical images have been placed.](docs/media/historical-overlap.gif)
 
 In the second recording, all eleven historical views are already in place. The player walks 18.1 blocks from Baltimore’s banana docks toward a French chocolate card depicting Pasteur, then retraces the route. Watch the fixed camera while the player walks forward and back. The same blocks shift in both directions, with their faces aligned to the world axes. **Replay placement** repeats the arrival of a source. Walking through an established overlap controls the blend with your position. [Enter the recorded overlap](https://jkubiniec.github.io/strata/?demo=walk&complete=1&overlap=1&seed=arcade11)
-
-## Walk into a moving film
-
-![Original 1900 train film beside the same frames playing in the voxel world.](docs/media/video-voxels.gif)
-
-The left panel shows a thirteen-second excerpt from *New Black Diamond Express*, filmed by the Edison Manufacturing Co. in 1900. The right panel shows the same instants in Strata with a fixed game camera. The approaching locomotive changes both the surface depth and the color of the voxels. Step sideways in the demo to see the parallax. **Pause video** freezes the field and the playback slider lets you scrub through it. [Enter the train scene](https://jkubiniec.github.io/strata/?demo=video) · [Library of Congress film record](https://www.loc.gov/item/00694259/)
 
 ## Bring your own photos and video
 
