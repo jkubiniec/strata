@@ -194,3 +194,29 @@ dialog:has(.history-grid){width:min(790px,calc(100% - 24px))}
  html[data-platform="computer"] .playing #touch-pad{display:none}
 }
 .capture-hud #view-mix{position:relative;inset:auto}
+
+.local-link{display:flex;align-items:center;justify-content:center;gap:4px 26px;flex-wrap:wrap}
+.film-demo #bank-entry,.watching-flight :is(#entry,.inventory,.compass,.crosshair,.capture-hud,#auto-hud,#clip-hud,#mobile-inspector){display:none}
+#watch-flight[hidden],#stop-flight[hidden]{display:none}
+#stop-flight{position:absolute;bottom:max(12px,env(safe-area-inset-bottom));right:16px;z-index:3}
+dialog:has(.placement-map){width:min(680px,calc(100% - 20px))}
+.placement-map{position:relative;width:100%;height:clamp(172px,30dvh,280px);background:#151c2a;border:1px solid #566277;border-radius:2px}
+.placement-map canvas{display:block;width:100%;height:100%}
+.map-pin{position:absolute;transform:translate(-50%,-50%);width:44px;height:44px;display:grid;place-items:center;color:var(--ink);line-height:1}
+.map-pin span{padding:3px 5px;min-width:23px;background:#171d2e;border:1px solid currentColor;box-shadow:2px 2px #131623;font:600 11px/1.2 var(--mono)}
+.map-pin:hover span,.map-pin:focus-visible span{background:var(--ink);color:#131824;border-color:var(--ink)}
+.map-search{display:flex;gap:8px;margin:13px 0 8px}
+.map-search input{min-width:0;width:100%;height:40px;background:#171c2b;border:1px solid #526176;padding:0 10px;color:var(--fg);font:12px var(--mono)}
+.map-search input::placeholder{color:var(--muted)}
+.map-search button{flex:none;color:var(--acid);font:11px var(--mono);padding:0 5px}
+.dialog-body .map-instructions{margin:0 0 9px}
+.dialog-body .map-count{margin:4px 0 8px;color:var(--muted);font:11px var(--mono)}
+.map-row-arrow{color:var(--acid);margin:0 6px}
+.region-atlas .atlas-row{min-width:0;overflow-wrap:anywhere}
+.region-atlas .atlas-row small{display:block}
+@media(max-width:760px),(pointer:coarse) and (max-height:550px){
+ body:has(#demo-back:not([hidden])) .topbar nav{display:flex}
+ .topbar #view-world{display:none}
+}
+@media(max-width:540px){#history-browser span{display:none}}
+@media(max-height:500px){.placement-map{height:154px}}

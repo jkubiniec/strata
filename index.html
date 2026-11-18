@@ -15,29 +15,30 @@
   root.dataset.platform = platform === 'phone' || platform === 'computer' ? platform : (matchMedia('(pointer:coarse)').matches ? 'phone' : 'computer');
 </script>
 <link rel="stylesheet" href="./studio.css?v=3.7">
-<link rel="stylesheet" href="./arcade.css?v=4.0">
+<link rel="stylesheet" href="./arcade.css?v=4.1">
 <script type="importmap">
 {
   "imports": {
-    "./game.js": "./game.js?v=4.0",
-    "./video-field.js": "./video-field.js?v=4.0",
+    "./game.js": "./game.js?v=4.1",
+    "./video-field.js": "./video-field.js?v=4.1",
     "./video-source.js": "./video-source.js?v=4.0",
     "./touch-pad.js": "./touch-pad.js?v=4.0",
-    "./world.js": "./world.js?v=4.0",
+    "./terrain-projection.js": "./terrain-projection.js?v=4.1",
+    "./world.js": "./world.js?v=4.1",
     "./vision.js": "./vision.js?v=4.0",
     "./morph.js": "./morph.js?v=3.5",
     "./reconstruction.js": "./reconstruction.js?v=3.5",
     "./interface.js": "./interface.js?v=4.0",
-    "./placements.js": "./placements.js?v=3.5",
-    "./view-volume.js": "./view-volume.js?v=4.0",
+    "./placements.js": "./placements.js?v=4.1",
+    "./view-volume.js": "./view-volume.js?v=4.1",
     "./photo-fusion.js": "./photo-fusion.js?v=3.5",
     "./stamp-clip.js": "./stamp-clip.js?v=3.5",
-    "./photo-assets.js": "./photo-assets.js?v=4.0",
+    "./photo-assets.js": "./photo-assets.js?v=4.1",
     "./walk-route.js": "./walk-route.js?v=4.0",
     "./photo-bank.js": "./photo-bank.js?v=4.0",
     "./performance-profile.js": "./performance-profile.js?v=4.0",
     "./photo-motion.js": "./photo-motion.js?v=3.5",
-    "./fusion-task.js": "./fusion-task.js?v=3.5",
+    "./fusion-task.js": "./fusion-task.js?v=4.1",
     "./bank-preview.js": "./bank-preview.js?v=3.5"
   }
 }
@@ -56,13 +57,13 @@
       <a class="mode-card computer-card" href="./?demo=computer"><img src="./assets/arcade/computer.png" width="72" height="63" alt=""><span><strong>Computer demo</strong><small>Keyboard + mouse</small></span><i aria-hidden="true">➜</i></a>
       <a class="mode-card phone-card" href="./?demo=phone"><img src="./assets/arcade/phone.png" width="72" height="63" alt=""><span><strong>Phone demo</strong><small>Touch controls</small></span><i aria-hidden="true">➜</i></a>
     </nav>
-    <div class="local-link"><a href="./?world=mine">Play with my own photos &amp; videos <span aria-hidden="true">↗</span></a></div>
+    <div class="local-link"><a href="./?demo=flight">Fly from Apollo 11 to Discovery <span aria-hidden="true">↗</span></a><a href="./?world=mine">Play with my own photos &amp; videos <span aria-hidden="true">↗</span></a></div>
   </div>
 </section>
 <header class="topbar">
   <a class="brand" href="./" aria-label="Strata home"><img src="./assets/arcade/visitor.png" alt=""><span>STRATA</span></a>
   <span class="brand-caption">Photo &amp; film arcade</span>
-  <nav aria-label="Workspace"><button id="view-world" class="nav-item active"><i data-icon="cube"></i><span>World</span></button><button id="view-atlas" class="nav-item"><i data-icon="layers"></i><span>Placements</span></button></nav>
+  <nav aria-label="Workspace"><button id="view-world" class="nav-item active"><i data-icon="cube"></i><span>World</span></button><button id="view-atlas" class="nav-item" title="Placement sitemap (M)" disabled><i data-icon="route"></i><span>Sitemap</span></button></nav>
   <div class="top-actions"><button id="history-browser" type="button" class="quiet" aria-label="Open historical atlas"><i data-icon="layers"></i><span>Historical atlas</span></button><a href="./?world=mine" hidden id="demo-back">My media <span aria-hidden="true">↗</span></a><button id="controls" title="Controls" class="quiet"><i data-icon="keyboard"></i><span>Controls</span></button><span class="vline"></span><button id="fullscreen" class="square" aria-label="Enter fullscreen" title="Fullscreen"><i data-icon="expand"></i></button></div>
 </header>
 <main>
@@ -74,7 +75,7 @@
    <div class="region-tag"><span class="live-dot"></span><span id="region-no">CAPTURED VIEW</span></div>
    <h1 id="world-title">Photo world</h1>
   </div>
-  <button id="view-mix" aria-label="Inspect photos in this view"><span id="mix-thumbs"></span><span id="view-count">1 photo in view</span><span id="mix-meter" aria-hidden="true"></span></button>
+  <button id="view-mix" aria-label="Open the placement sitemap"><span id="mix-thumbs"></span><span id="view-count">1 photo in view</span><span id="mix-meter" aria-hidden="true"></span></button>
   <button id="walk-waypoint" hidden title="Walk to this waypoint to place its photo, or select it to jump there"></button>
   </div>
   <div class="compass" aria-label="Compass"><div class="compass-center"></div><div id="compass-tape"></div><span id="bearing">N · 000°</span></div>
@@ -82,7 +83,8 @@
   <button id="auto-hud" type="button" aria-pressed="false" title="Toggle automatic placement (G)" hidden><span id="auto-mode">Start cycling</span><small id="auto-ready"></small></button>
   <button id="clip-hud" type="button" hidden>Pause video</button>
   <div class="crosshair" aria-hidden="true"></div>
-  <div class="entry" id="entry"><div class="aim-row"><button id="turn-left" class="aim-turn" aria-label="Turn left 15 degrees" title="Turn left 15°" disabled>↶</button><button id="play" class="play" disabled><i data-icon="play"></i><span>Enter world</span></button><button id="turn-right" class="aim-turn" aria-label="Turn right 15 degrees" title="Turn right 15°" disabled>↷</button></div><button id="bank-entry" type="button" disabled><i data-icon="image"></i>Import &amp; walk</button><span class="entry-hint">Aim with the mouse · B cycles bank photos · U chooses a photo</span></div>
+  <div class="entry" id="entry"><div class="aim-row"><button id="turn-left" class="aim-turn" aria-label="Turn left 15 degrees" title="Turn left 15°" disabled>↶</button><button id="play" class="play" disabled><i data-icon="play"></i><span>Enter world</span></button><button id="turn-right" class="aim-turn" aria-label="Turn right 15 degrees" title="Turn right 15°" disabled>↷</button></div><button id="watch-flight" class="play" type="button" hidden>Watch flight</button><button id="bank-entry" type="button" disabled><i data-icon="image"></i>Import &amp; walk</button><span class="entry-hint">Aim with the mouse · B cycles bank photos · U chooses a photo</span></div>
+  <button type="button" class="play" id="stop-flight" hidden>Stop flight</button>
   <div class="inventory" id="inventory" role="toolbar" aria-label="Building materials"></div>
   <div id="current-block"></div>
   <div id="touch-pad" aria-label="Touch movement controls">
@@ -112,7 +114,7 @@
     <div class="bank-actions"><button id="bank-load" class="sample-path" disabled title="Add photos and videos together"><i data-icon="plus"></i>Load photos &amp; videos</button><button id="bank-next" class="sample-path" disabled>Place next <kbd>B</kbd></button></div>
     <label class="bank-switch"><span>Cycle as I move</span><input type="checkbox" role="switch" id="bank-auto" aria-describedby="bank-rule"></label>
     <p id="bank-rule">Walk 12 blocks or turn 35° to place the next ready item.</p>
-    <a id="film-link" class="inline-link" href="./?demo=video">Explore a moving train film <i data-icon="arrow-ne"></i></a>
+    <a id="film-link" class="inline-link" href="./?demo=flight">Fly from Apollo 11 to Discovery <i data-icon="arrow-ne"></i></a>
     <a id="auto-link" class="inline-link" href="./?demo=autowalk">Try the automatic photo walk <i data-icon="arrow-ne"></i></a>
     <small id="bank-pending" role="status" hidden></small>
    </section>
@@ -140,9 +142,9 @@
 <footer class="statusbar"><div class="status-left"><span class="status-live"><b></b><span id="connection">Initializing</span></span><span class="foot-sep"></span><span class="xyz"><i data-icon="pin"></i><span id="coords">X 0 &nbsp; Y 0 &nbsp; Z 0</span></span></div><div class="status-right"><span id="flight-status">Walk mode</span><span class="foot-sep"></span><span id="fps">— FPS</span><span class="foot-sep"></span><span id="save-status"><i data-icon="drive"></i>Local session</span></div></footer>
 <input type="file" accept="image/*,video/*,.mov,.mp4,.m4v,.webm,.heic,.heif" id="file" hidden>
 <input type="file" accept="image/*,video/*,.mov,.mp4,.m4v,.webm,.heic,.heif" id="bank-files" multiple hidden>
-<dialog id="modal"><div class="dialog-head"><div><div class="eyebrow" id="modal-kicker">STRATA</div><h2 id="modal-title"></h2></div><button id="close-modal" class="square" aria-label="Close dialog"><i data-icon="x"></i></button></div><div class="dialog-body" id="modal-body"></div></dialog>
+<dialog id="modal" aria-labelledby="modal-title"><div class="dialog-head"><div><div class="eyebrow" id="modal-kicker">STRATA</div><h2 id="modal-title"></h2></div><button id="close-modal" class="square" aria-label="Close dialog"><i data-icon="x"></i></button></div><div class="dialog-body" id="modal-body"></div></dialog>
 <script type="module">
-  if (document.documentElement.dataset.screen === 'game') await import('./studio.js?v=4.0');
+  if (document.documentElement.dataset.screen === 'game') await import('./studio.js?v=4.1');
 </script>
 </body>
 </html>

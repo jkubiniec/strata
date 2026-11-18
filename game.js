@@ -5,6 +5,7 @@ import { createPhotoSurface } from './reconstruction.js';
 import { ViewVolumeAtlas, cameraStamp, captureStamp } from './view-volume.js';
 import { StampClip } from './stamp-clip.js';
 import { VideoField } from './video-field.js';
+import {backdropProjectionGL} from './terrain-projection.js';
 import { BLOCKS, VoxelWorld, photoVerticalSlope, PHOTO_HORIZON, photoDistance } from './world.js';
 
 const clamp = THREE.MathUtils.clamp;
@@ -93,30 +94,32 @@ function skyColors(profile, first) {
   return { top, horizon };
 }
 
-function createSky() {
+function createSky(projection) {
   const material = new THREE.ShaderMaterial({
     uniforms: {
+      ...projection,
       topColor: { value: new THREE.Color('#78afca') },
       horizonColor: { value: new THREE.Color('#e1e4d5') }
     },
     vertexShader: `
-      varying vec3 vRay;
+      varying vec3 vRay,vSkyWorld;
       void main() {
-        vRay = position;
+        vRay = position;vSkyWorld=(modelMatrix*vec4(position,1.)).xyz;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.);
       }
     `,
-    fragmentShader: `
+    fragmentShader: backdropProjectionGL+`
       uniform vec3 topColor;
       uniform vec3 horizonColor;
-      varying vec3 vRay;
+      varying vec3 vRay,vSkyWorld;
       void main() {
         vec3 ray = normalize(vRay);
         float height = pow(clamp(ray.y * 1.52 + .017, 0., 1.), .63);
         vec3 color = mix(horizonColor, topColor, height);
         float sun = max(dot(ray, normalize(vec3(-.72,.82,.34))), 0.);
         color += vec3(.1,.072,.036) * pow(sun, 10.);
-        gl_FragColor = vec4(color, 1.);
+        vec4 capture=capturedBackdrop(vSkyWorld);
+        gl_FragColor = vec4(mix(color,capture.rgb,capture.a), 1.);
         #include <colorspace_fragment>
       }
     `,
@@ -128,7 +131,7 @@ function createSky() {
   return sky;
 }
 
-function createClouds() {
+function createClouds(projection) {
   const random = randomStream(8411);
   const transforms = [];
   // Low, gently stepped cloud banks. The whole cloud field follows the sky;
@@ -149,6 +152,15 @@ function createClouds() {
   }
   const geometry = new THREE.BoxGeometry(1, 1, 1);
   const material = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true, fog: true });
+  material.onBeforeCompile=shader=>{
+    Object.assign(shader.uniforms,projection);
+    shader.vertexShader='varying vec3 cloudWorld;\n'+shader.vertexShader.replace('#include <project_vertex>',
+      '#include <project_vertex>\ncloudWorld=(modelMatrix*instanceMatrix*vec4(transformed,1.)).xyz;');
+    shader.fragmentShader='varying vec3 cloudWorld;\n'+backdropProjectionGL+shader.fragmentShader.replace('#include <fog_fragment>',`
+      #include <fog_fragment>
+      vec4 capture=capturedBackdrop(cloudWorld);
+      gl_FragColor.rgb=mix(gl_FragColor.rgb,linearToOutputTexel(vec4(capture.rgb,1.)).rgb,capture.a);`);
+  };
   const colors = [], normal = geometry.attributes.normal;
   for (let i = 0; i < normal.count; i++) {
     const color = new THREE.Color(normal.getY(i) < -.5 ? '#d2dad4' : normal.getY(i) > .5 ? '#f6f7e9' : '#e5e9db');
@@ -499,12 +511,13 @@ export class Game {
     this.fov = 65;
     this.camera = new THREE.PerspectiveCamera(this.fov, 1, .07, 600);
     this.camera.rotation.order = 'YXZ';
-    this.sky = createSky();
-    this.clouds = createClouds();
     this.voxels = new THREE.Group();
     this.voxels.name = 'Editable voxel world';
-    this.scene.add(this.sky, this.clouds, this.voxels);
     this.world = new VoxelWorld(this.voxels,this.budget);
+    const projection=this.world.terrainProjection.uniforms;
+    this.sky = createSky(projection);
+    this.clouds = createClouds(projection);
+    this.scene.add(this.sky, this.clouds, this.voxels);
     const ambient = new THREE.HemisphereLight('#e5eff8', '#ac9975', 1.25);
     this.sun = new THREE.DirectionalLight('#ffebcc', 2.28);
     this.sun.castShadow = !this.mobile;
@@ -538,7 +551,7 @@ export class Game {
     this.keyOwners = new Map();
     this.regions = [];
     this.stamps=[];
-    this.viewAtlas=new ViewVolumeAtlas(this.budget);
+    this.viewAtlas=new ViewVolumeAtlas(this.budget,this.world.terrainProjection.uniforms);
     this.scene.add(this.viewAtlas.mesh);
     this.viewAtlas.mesh.visible=false;
     this.stampClip=new StampClip();
@@ -598,7 +611,6 @@ export class Game {
     const height = Math.max(1, this.canvas.clientHeight || 1);
     const scale = Math.min(window.devicePixelRatio || 1, this.budget.pixelRatio, Math.sqrt(this.budget.rasterPixels / (width*height)))*this.raster.scale;
     if (this.drawSize[0] === width && this.drawSize[1] === height && this.drawSize[2] === scale) return;
-    if(this.drawSize[0]!==width||this.drawSize[1]!==height)this.recalledAspect=null;
     if((this.drawSize[0]>this.drawSize[1])!==(width>height)){
       this.drag=null;this.heldAction=null;
     }
@@ -730,7 +742,7 @@ export class Game {
     const frame=captureStamp(this.camera);
     return Object.freeze({...frame,eye:Object.freeze({x:this.camera.position.x,y:this.camera.position.y,z:this.camera.position.z}),
       x:this.camera.position.x,y:this.camera.position.y,z:this.camera.position.z,
-      yaw:this.yaw,pitch:this.pitch,fov:this.camera.fov,aspect:this.camera.aspect,near:this.camera.near,far:this.camera.far});
+      yaw:this.yaw,pitch:this.pitch,flying:this.flying,fov:this.camera.fov,aspect:this.camera.aspect,near:this.camera.near,far:this.camera.far});
   }
 
   turnView(deltaYaw,deltaPitch=0) {
@@ -769,6 +781,7 @@ export class Game {
   }
 
   registerPhoto(profile,frame,bounds){
+    this.viewAtlas.preferredCapture=this.stamps.length;
     this.stamps.push({profile,capture:frame,bounds});
     if(!this.liveViews) {
       this.liveLens=this.camera.fov;
@@ -831,6 +844,8 @@ export class Game {
     const stamp=this.stamps[index];
     if(!stamp)return false;
     const f=stamp.capture,eye=f.eye;
+    this.viewAtlas.preferredCapture=index;
+    if(typeof f.flying==='boolean')this.flying=f.flying;
     this.position.set(eye.x,eye.y-eyeHeight,eye.z);this.yaw=f.yaw;this.pitch=f.pitch;
     this.liveLens=f.fov;this.recalledAspect=f.aspect;
     this.camera.near=f.near;this.camera.far=f.far;
@@ -904,7 +919,6 @@ export class Game {
 
   play() {
     if (this.playing || this.suspended || !this.regions.length) return;
-    this.useLiveViewport();
     this.playing = true;
     this.canvas.focus?.({ preventScroll: true });
     this.notify('onPlay', true);
