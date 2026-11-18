@@ -69,6 +69,9 @@ test('each finger and the keyboard retain independent ownership through releases
   win.fire('touchend', {touches: [{target: null}]}); // Only the look finger remains.
   assert.deepEqual([...game.keys], ['KeyW']);
   down(11, 1);
+  win.fire('orientationchange', {});
+  assert.deepEqual([...game.keys], ['KeyW']);
+  down(12, 1);
   clear(); // Pause or leave the page while the finger is down.
   move(11, 0);
   assert.deepEqual([...game.keys], ['KeyW']);

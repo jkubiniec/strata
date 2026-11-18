@@ -65,5 +65,8 @@ export function bindTouchPad(pad, moveKey) {
   for (const type of ['touchend', 'touchcancel']) {
     win.addEventListener(type, reconcile, {capture:true, passive:true});
   }
+  // Rotation can relocate the entire pad under a stationary thumb.
+  win.addEventListener('orientationchange',clear);
+  win.matchMedia?.('(orientation: portrait)').addEventListener?.('change',clear);
   return clear;
 }

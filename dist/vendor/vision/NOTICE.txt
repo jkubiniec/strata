@@ -27,7 +27,7 @@ Authors: Lihe Yang, Bingyi Kang, Zilong Huang, Zhen Zhao, Xiaogang Xu, Jiashi Fe
 
 depth-v2-small.1.bin and depth-v2-small.2.bin are consecutive pieces of the unmodified quantized ONNX export. For inference, the worker assembles the model in memory and processes a resized RGB image with ImageNet normalization. The depth map stores relative inverse depth, scaled per image using the first and 99th percentiles. The model estimates the visible surfaces of one photograph.
 
-refinery-depth.bin is the 518 x 350 prediction on the bundled refinery.jpg (source photo SHA-256 a3f863621247a968cef138142acb81af01ea2817bf5b972be17f3a276d9e9a6e). The first four bytes encode width and height as little-endian uint16 values, followed by row-major 16-bit inverse depth. The starter's train detection also comes from a local Tiny YOLOv3 inference on this source. The application reuses those two fixed outputs on first launch. Newly imported photographs run both models locally, with the depth input capped according to original resolution and available memory.
+Public atlas studies contain precomputed depth, color and object features for the corresponding archival image. Newly imported media runs the models locally.
 
 ONNX Runtime Web 1.22.0 is copyright Microsoft Corporation and contributors, distributed under the MIT License. See LICENSE-ONNX-Runtime.txt and NOTICE-ONNX-Dependencies.txt.
   Runtime: https://github.com/microsoft/onnxruntime/tree/v1.22.0/js/web

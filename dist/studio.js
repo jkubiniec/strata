@@ -2,28 +2,36 @@ import { Game } from './game.js';
 import { cameraStamp } from './view-volume.js';
 import { BLOCKS } from './world.js';
 import { analyzeImage, detectObjects } from './vision.js';
-import { icons, cubeIcon, depthImage, openDatabase, readStore, writeStore } from './interface.js';
+import { icons, cubeIcon, depthImage, openDatabase, readStore, writeStore, withStorableMedia } from './interface.js';
 
 import { describePose, heading, placementColor, placementMap } from './placements.js';
-import { sampleProfile, refineryFeatures, importPixels, sourceBlob } from './photo-assets.js';
+import { expressProfile, importPixels, sourceBlob } from './photo-assets.js';
+import { isVideoFile, prepareVideo } from './video-source.js';
+import {loadHistory} from './history-atlas.js';
 import { isMobileRenderer } from './performance-profile.js';
-import { WALK_STOPS, walkCapture, loadWalkProfile } from './walk-route.js';
+import { makeWalk, walkCapture, loadWalkProfile } from './walk-route.js';
 import { PhotoBank, WalkingPlacement, sameAutoView } from './photo-bank.js';
 import { prepareBankPreview, showBankPreview } from './bank-preview.js';
 import { bindTouchPad } from './touch-pad.js';
 
 const $=id=>document.getElementById(id);
-const requestedDemo=new URLSearchParams(location.search).get('demo');
+const params=new URLSearchParams(location.search);
+const demo=params.get('world')!=='mine';
+const requestedDemo=demo?(params.get('demo')||'computer'):null;
 const walkDemo=requestedDemo==='walk';
-const autoDemo=requestedDemo==='autowalk';
-const completedWalk=walkDemo&&new URLSearchParams(location.search).get('complete')==='1';
-const overlapStudy=completedWalk&&new URLSearchParams(location.search).get('overlap')==='arch';
-const demo=walkDemo||autoDemo||requestedDemo==='views'||requestedDemo==='morph';
-let walkOrigin,walkIndex=1,walkRetryAt=0;
+const autoDemo=['autowalk','computer','phone'].includes(requestedDemo);
+const videoDemo=requestedDemo==='video';
+const completedWalk=walkDemo&&params.get('complete')==='1';
+const overlapStudy=completedWalk&&!!params.get('overlap');
+const seed=params.get('seed')||crypto.getRandomValues(new Uint32Array(1))[0].toString(36);
+let historyDeck=[],walkStops=[],warming=false,archiveOffered=false;
+let walkOrigin,walkIndex=1,walkRetryAt=0,walkAutomatic=true;
 const atlas=[], views=[], settings={mode:'hybrid',opacity:65,fov:65};
 let game,db,library,ready=false,busy=false,playing=false,region=0,latestStats=null,selected=0,inspectedURL;
 let pendingPlacement=null, visibleKey='', selectedViewId=null;
 let noticeTimer,saveTimer,saveFailed=false,clearTouchPad;
+const clipViews=new Map();
+let controlClip=null;
 const exampleBank=[], savedBankSources=new Set();
 let bankOpen=false,bankPlacements=0,lastBankTime=0;
 let sampleAutomatic=autoDemo||new URLSearchParams(location.search).get('auto')==='1',warmProfile,autoAfterPicker=false;
@@ -44,6 +52,7 @@ function buttons(){
 }
 function renderBank(){
   const items=bank.items.length?bank.items:exampleBank;
+  if(archiveOffered&&!warming)void warmArchive();
   let count=0,failed=0;
   for(const item of items){if(item.profile)count++;else if(item.failed)failed++;}
   const remaining=items.length-count-failed;
@@ -52,16 +61,17 @@ function renderBank(){
   $('bank-entry').disabled=!bankOpen||!ready;
   $('bank-next').disabled=!ready||!next;
   $('bank-touch').hidden=!ready||!next;
-  const automatic=bank.items.length?bank.automatic:sampleAutomatic;
+  const automatic=automaticEnabled();
   $('bank-auto').disabled=!items.length;
   $('bank-auto').checked=!!items.length&&automatic;
   $('auto-hud').hidden=!items.length;
-  $('auto-hud').setAttribute('aria-checked',String(automatic));
-  $('auto-mode').textContent=automatic?'Auto on':'Auto off';
-  $('auto-ready').textContent=count+' / '+items.length+' ready';
-  $('bank-count').textContent=count+' ready'+(remaining?' · '+remaining+' preparing':'')+(failed?' · '+failed+' unreadable':'');
+  $('auto-hud').setAttribute('aria-pressed',String(automatic));
+  $('auto-mode').textContent=automatic?'Stop cycling':'Start cycling';
+  $('auto-hud').setAttribute('aria-label',$('auto-mode').textContent+' photos and videos');
+  $('auto-ready').textContent=archiveOffered?historyDeck.length+' in atlas':count+' / '+items.length+' ready';
+  $('bank-count').textContent=(archiveOffered?count+' ready · '+historyDeck.length+' in atlas':count+' ready'+(remaining?' · '+remaining+' preparing':''))+(failed?' · '+failed+' unreadable':'');
   $('bank-upcoming').textContent=next?(!bank.items.length?'Sample · ':'Next · ')+next.name:
-    remaining?'Preparing photos on this device…':'Select several photos to build a walking route.';
+    remaining?'Preparing media on this device…':'Select photos and videos together.';
   $('bank-thumb').hidden=!next;
   if(next&&$('bank-thumb').getAttribute('src')!==next.thumb)$('bank-thumb').src=next.thumb;
   if(!next)$('bank-thumb').removeAttribute('src');
@@ -76,21 +86,24 @@ function movementPose(){
   const {x,y,z}=game.position;
   return {x,y,z,yaw:game.yaw,pitch:game.pitch};
 }
-function automaticEnabled(){return bank.items.length?bank.automatic:sampleAutomatic;}
+function guidedWalk(){return walkDemo&&!completedWalk&&!bank.items.length&&walkIndex<walkStops.length;}
+function automaticEnabled(){return bank.items.length?bank.automatic:guidedWalk()?walkAutomatic:sampleAutomatic;}
 function setAutomatic(enabled){
   if(game)walkingPlacement.reset(movementPose());
   if(bank.items.length)bank.setAutomatic(enabled);
-  else{sampleAutomatic=enabled;renderBank();queueSave();}
+  else{if(guidedWalk())walkAutomatic=enabled;else sampleAutomatic=enabled;renderBank();queueSave();}
 }
 function trackBank(){
-  if(!playing||document.hidden||!automaticEnabled())return;
+  if(!playing||document.hidden||guidedWalk()||!automaticEnabled())return;
   const available=!busy&&!bankPlacements&&!game.viewAtlas.animating&&!!bank.next(exampleBank);
   if(walkingPlacement.update(movementPose(),performance.now(),available))placeBankPhoto(true);
 }
 function setSaved(text){$('save-status').lastChild.textContent=' '+text;}
 function saveSettings(){
   if(!ready||!library||saveFailed)return;
-  const state={...settings,selectedViewId,sampleAutomatic,player:game.saveState()};
+  const clipTimes={};
+  for(const id of clipViews.keys())clipTimes[id]=game.videoField.time(id);
+  const state={...settings,selectedViewId,sampleAutomatic,walkAutomatic,clipTimes,clipsPlaying:game.videoField.playing,player:game.saveState()};
   writeStore(library,'settings',state,'session').catch(()=>{saveFailed=true;setSaved('Session only');notice('Browser storage is full or unavailable. This session is still playable.');});
 }
 function queueSave(){clearTimeout(saveTimer);saveTimer=setTimeout(saveSettings,220);}
@@ -122,18 +135,46 @@ function displayRegion(index){
   const r=views[index];if(!r)return;
   region=index;selectedViewId=r.id;
   const p=r.profile;
-  $('source-index').textContent=pad(index+1)+' / '+pad(views.length);$('thumb').src=r.thumb;$('thumb').alt=r.title+' source photograph';
+  $('source-index').textContent=pad(index+1)+' / '+pad(views.length);$('thumb').src=r.thumb;$('thumb').alt=r.title+(p.video?' video frame':' source photograph');
   $('filename').textContent=r.name;$('filetype').textContent=r.name.includes('.')?r.name.split('.').pop().slice(0,5).toUpperCase():'IMG';
   $('dimensions').textContent=p.width+' × '+p.height+' px';$('kind').textContent=cap(p.kind);
   $('view-heading').textContent=describePose(r.capture);
   $('palette').replaceChildren(...p.palette.map(color=>{const s=document.createElement('span');s.style.background=color;s.title=color;s.setAttribute('aria-label',color);return s;}));
+  drawClipControls();
+}
+function clipTime(seconds){
+  const whole=Math.max(0,Math.floor(seconds||0));
+  return Math.floor(whole/60)+':'+String(whole%60).padStart(2,'0');
+}
+function drawClipControls(){
+  if(!clipViews.size)return;
+  const dominant=views[latestStats?.viewBlend?.dominant];
+  const record=views[region]?.profile.video?views[region]:dominant?.profile.video?dominant:clipViews.values().next().value;
+  const clip=record.profile.video,field=game.videoField;
+  if(controlClip?.id!==clip.id){
+    controlClip=clip;
+    $('clip-name').textContent=record.title;
+    $('clip-position').max=clip.duration;
+  }
+  $('clip-panel').hidden=$('clip-hud').hidden=false;
+  const action=field.playing?'Pause video':'Play video';
+  if($('clip-toggle').textContent!==action)$('clip-hud').textContent=$('clip-toggle').textContent=action;
+  const time=field.time(clip.id);
+  $('clip-clock').textContent=clipTime(time)+' / '+clipTime(clip.duration);
+  if(!$('clip-position').matches(':active'))$('clip-position').value=time;
+}
+function toggleClips(){
+  if(!game||!clipViews.size)return;
+  game.videoField.setPlaying(!game.videoField.playing);
+  game.drawRequested=true;drawClipControls();queueSave();
 }
 function updateViewHUD(s){
   const indices=(s?.viewBlend?.indices||[]).filter(i=>views[i]);
   const key=indices.join(',')+'/'+views.length;
   if(visibleKey!==key){
     visibleKey=key;
-    $('view-count').textContent=indices.length+' photo'+(indices.length===1?'':'s')+' in view';
+    const media=indices.some(i=>views[i].profile.video);
+    $('view-count').textContent=indices.length+(media?(indices.length===1?' video':' sources'):indices.length===1?' photo':' photos')+' in view';
     $('mix-meter').replaceChildren(...indices.map(i=>{const segment=document.createElement('span');segment.style.background=placementColor(i);return segment;}));
     $('mix-thumbs').replaceChildren(...indices.slice(-4).map(i=>{
       const img=document.createElement('img');img.src=views[i].thumb;img.alt='';img.style.borderColor=placementColor(i);return img;
@@ -151,42 +192,54 @@ function onStats(s){
   latestStats=s;compass(s.heading);$('coords').textContent='X '+Math.floor(s.x)+'  Y '+Math.floor(s.y)+'  Z '+Math.floor(s.z);
   $('fps').textContent=playing?Math.round(s.fps)+' FPS':'WebGL 2';$('flight-status').textContent=s.flying?'Fly mode':'Walk mode';
   if(views.length)updateViewHUD(s);
+  drawClipControls();
   if(walkDemo&&ready)trackWalk(s);
   if(ready)trackBank();
 }
 
 function walkRecord(stop,profile) {
-  return {id:'walk-'+stop.id,created:Date.now(),profile,title:stop.title,name:stop.image.split('/').pop(),
+  return {id:'walk-'+stop.id,created:Date.now(),historyId:stop.id,profile,title:stop.title,name:stop.title,
     thumb:stop.image,capture:walkCapture(game,stop,walkOrigin)};
 }
-async function loadAutoSamples(){
-  // The starting refinery already has geometry. Offer the launch next, then
-  // work through each photograph and wrap back to the refinery.
-  const refinery=exampleBank[0];
-  const samples=WALK_STOPS.slice(1).map(stop=>({id:'walk-'+stop.id,name:stop.image.split('/').pop(),title:stop.title,thumb:stop.image,stop}));
-  exampleBank.splice(0,exampleBank.length,...samples,refinery);
+function offerArchive(){
+  const base=exampleBank[0];
+  const items=(videoDemo?historyDeck:[...historyDeck.slice(1),historyDeck[0]]).map(stop=>({id:'walk-'+stop.id,name:stop.title,title:stop.title,thumb:stop.image,stop}));
+  const placed=new Map(views.map(r=>[r.historyId||String(r.id).replace(/^walk-/,''),r.profile]));
+  for(const item of items)item.profile=placed.get(item.stop.id);
+  if(videoDemo&&base)items.push(base);
+  exampleBank.splice(0,exampleBank.length,...items);archiveOffered=true;
   renderBank();
-  for(const sample of samples){
-    if(bank.items.length)break;
-    try{sample.profile=await loadWalkProfile(sample.stop);}
-    catch{sample.failed=true;}
-    renderBank();
-  }
+}
+async function warmArchive(){
+  if(!archiveOffered||warming||!demo)return;
+  warming=true;
+  try{
+    const cursor=exampleBank.findIndex(r=>r.id===bank.lastId);
+    for(let i=1;i<=Math.min(3,exampleBank.length);i++){
+      const item=exampleBank[(cursor+i)%exampleBank.length];
+      if(item.profile||item.failed||!item.stop)continue;
+      try{item.profile=await loadWalkProfile(item.stop);}catch{item.failed=true;}
+      renderBank();
+    }
+  }finally{warming=false;}
+  // The player may have placed another item during a fetch.
+  const cursor=exampleBank.findIndex(r=>r.id===bank.lastId);
+  if([1,2,3].some(i=>{const r=exampleBank[(cursor+i)%exampleBank.length];return r?.stop&&!r.profile&&!r.failed;}))warmArchive();
 }
 function nextWalkIndex(){
-  while(walkIndex<WALK_STOPS.length&&views.some(r=>r.id==='walk-'+WALK_STOPS[walkIndex].id))walkIndex++;
+  while(walkIndex<walkStops.length&&views.some(r=>r.id==='walk-'+walkStops[walkIndex].id))walkIndex++;
 }
 function trackWalk(s) {
-  const button=$('walk-waypoint'),stop=WALK_STOPS[walkIndex];
+  const button=$('walk-waypoint'),stop=walkStops[walkIndex];
   if(!stop||!walkOrigin){button.hidden=true;return;}
   const dx=walkOrigin.x+stop.x-s.x,dz=walkOrigin.z+stop.z-s.z,distance=Math.hypot(dx,dz);
   button.hidden=false;button.disabled=busy;
-  const label=pad(walkIndex+1)+' / '+WALK_STOPS.length+' · '+stop.title+' · '+heading(Math.atan2(dx,-dz))+' · '+Math.ceil(distance)+' blocks';
+  const label=pad(walkIndex+1)+' / '+walkStops.length+' · '+stop.title+' · '+heading(Math.atan2(dx,-dz))+' · '+Math.ceil(distance)+' blocks';
   if(button.textContent!==label)button.textContent=label;
-  if(playing&&!busy&&distance<=6&&Date.now()>walkRetryAt)placeWalkStop(false);
+  if(playing&&guidedWalk()&&walkAutomatic&&!busy&&distance<=6&&Date.now()>walkRetryAt)placeWalkStop(false);
 }
 async function placeWalkStop(visit){
-  const stop=WALK_STOPS[walkIndex];
+  const stop=walkStops[walkIndex];
   if(!stop||busy||!ready)return;
   busy=true;buttons();
   try{
@@ -196,7 +249,7 @@ async function placeWalkStop(visit){
     nextWalkIndex();
     if(visit){game.goToStamp(index);game.replayPlacement();}
     displayRegion(index);updatePathAction();
-    notice(stop.title+(walkIndex===WALK_STOPS.length?' · All 11 photos placed. Keep exploring.':' · Photo placed'));
+    notice(stop.title+(walkIndex===walkStops.length?' · All 11 photos placed. Keep exploring.':' · Photo placed'));
     await persistView(record);saveSettings();
   }catch(error){
     walkRetryAt=Date.now()+8000;
@@ -221,6 +274,22 @@ function applySettings(){
 function pop(kicker,title){
   game?.pause();$('modal-kicker').textContent=kicker;$('modal-title').textContent=title;$('modal-body').replaceChildren();
   if(!$('modal').open)$('modal').showModal();syncSuspension();return $('modal-body');
+}
+function showHistory(){
+  if(!historyDeck.length)return;
+  const body=pop('HISTORICAL ATLAS',historyDeck.length+' historical images');
+  const collection=document.createElement('div');collection.className='history-grid';
+  for(const item of historyDeck){
+    const card=document.createElement('article');card.className='history-card';
+    const image=document.createElement('img');image.loading='lazy';image.decoding='async';image.src=item.image;image.alt=item.title;
+    const title=document.createElement('h3');title.textContent=item.title;
+    const date=document.createElement('small');date.textContent=item.year+' · '+item.credit;
+    const caption=document.createElement('p');caption.textContent=item.description;
+    const source=document.createElement('a');source.href=item.source;source.target='_blank';source.rel='noreferrer';source.textContent='Collection record ↗';
+    const rights=document.createElement('small');rights.textContent=item.rights;
+    card.append(image,title,date,caption,source,rights);collection.append(card);
+  }
+  body.append(collection);
 }
 function closeModal(){if($('modal').open)$('modal').close();}
 function inspectImage(which='photo'){
@@ -250,10 +319,10 @@ function inspectImage(which='photo'){
 }
 function showControls(){
   const b=pop('FIELD GUIDE','Controls');
-  const actions=[['Walk',['W','A','S','D']],['Look around',['Mouse','I','J','K','L']],['Jump / ascend in flight',['Space']],['Sprint',['Shift']],['Toggle flight',['F','2× Space']],['Descend in flight',['Q']],['Mine / place block',['Left / E','Right / R']],['Select material',['1–7','Wheel']],['Pick targeted block',['Middle click']],['Place next bank photo',['B']],['Choose one photo for this view',['U']],['Release mouse / pause',['Esc']]];
+  const actions=[['Walk',['W','A','S','D']],['Look around',['Mouse','I','J','K','L']],['Jump / ascend in flight',['Space']],['Sprint',['Shift']],['Toggle flight',['F','2× Space']],['Descend in flight',['Q']],['Mine / place block',['Left / E','Right / R']],['Select material',['1–7','Wheel']],['Pick targeted block',['Middle click']],['Place next bank item',['B']],['Start / stop cycling',['G']],['Choose a photo or video',['U']],['Release mouse / pause',['Esc']]];
   const list=document.createElement('dl');list.className='key-list';
   for(const [name,keys] of actions){const dt=document.createElement('dt');dt.textContent=name;const dd=document.createElement('dd');keys.forEach(key=>{const k=document.createElement('kbd');k.textContent=key;dd.append(k,' ');});list.append(dt,dd);}
-  b.append(list);const p=document.createElement('p');p.textContent='On a phone, tap Import & walk to select several photos. Drag to look and use the arrows to walk. Tap Auto on or Auto off to switch automatic placement during play.';b.append(p);
+  b.append(list);const p=document.createElement('p');p.textContent='On a phone, tap Import & walk to choose photos and videos together. Hold or slide across the arrows to walk. Tap Stop cycling to explore, or Start cycling to place more media. Pause video controls film playback separately.';b.append(p);
   const label=document.createElement('label');label.className='range-label';label.htmlFor='fov';label.innerHTML='<span>Field of view</span><output></output>';
   const slider=document.createElement('input');slider.type='range';slider.min=45;slider.max=90;slider.id='fov';slider.value=settings.fov;
   const update=()=>{label.querySelector('output').textContent=slider.value+'°';slider.style.setProperty('--p',((slider.value-45)/45*100)+'%');};
@@ -264,14 +333,14 @@ function showNotes(){
   b.innerHTML=`
     <h3>Reconstructing the photograph</h3>
     <p>Depth Anything V2 estimates how far each part of the image sits from the camera. The original colors are projected onto those surfaces. Near objects move farther across your view when you step sideways. Farther surfaces extend behind silhouettes to fill some of the newly exposed space.</p>
-    <h3>Placing a photograph</h3>
-    <p>The photo bank prepares your selection on this device. With Place as I move enabled, walk 12 blocks or turn 35° to place the next ready photo in your current view. Placement waits for the previous blend to finish and cycles back to the first photo. You can also press B or tap Next photo.</p>
+    <h3>Placing photos and video</h3>
+    <p>The media bank prepares your selection on this device. Walk 12 blocks or turn 35° to place the next ready item in the direction you are facing. Start cycling and Stop cycling control that rotation. A placed video has its own clock. Its moving depth field shifts blocks and splats, even when you stand still. Use Video playback to pause or scrub it.</p>
     <h3>Blending shared space</h3>
     <p>Step toward a photo’s capture point and matching blocks and Gaussian splats shift toward its shapes and colors. Retrace your steps to reverse the change. Block faces stay aligned with the world axes, and blocks within building reach stay on the collision grid. Photo atlas recalls any saved viewpoint.</p>
     <h3>Exploring beyond the camera</h3>
     <p>The photograph supplies the visible appearance. Voxel terrain and scene-specific rules supply solid ground and plausible hidden faces. The inspector lets you isolate the voxels or splats and inspect the estimated depth. All photo analysis runs on this device.</p>
     <h3>Walkthrough photographs</h3>
-    <p>The eleven-photo trail includes the refinery photograph, images from SpaceX and NASA, and eight public-domain National Park Service photographs. <a href="https://github.com/jkubiniec/strata#the-photo-atlas" target="_blank" rel="noreferrer">See the photographs and their credits</a>.</p>
+    <p>Each public walk draws from a shuffled historical atlas. Open Historical atlas to see dates, captions, rights information and links to the original collections. Personal media lives in the separate My media world.</p>
     <h3>Research</h3>
     <p class="notes-source">Layered depth helps fill newly visible surfaces. <a href="https://www.robots.ox.ac.uk/~vgg/research/flash3d/" target="_blank" rel="noreferrer">Flash3D</a> · <a href="https://apple-aiml-research.github.io/ml-sharp/" target="_blank" rel="noreferrer">SHARP</a></p>
     <p class="notes-source">Anisotropic splats carry light and color. Cross-image feature matches guide the shape change. <a href="https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/" target="_blank" rel="noreferrer">3D Gaussian Splatting</a> · <a href="https://arxiv.org/abs/1705.01088" target="_blank" rel="noreferrer">Deep Image Analogy</a></p>`;
@@ -295,6 +364,7 @@ function showAtlas(){
   const add=document.createElement('button');add.className='primary atlas-add';add.textContent='+  Add photo here';add.disabled=!ready||busy;add.onclick=requestPhoto;b.append(add);icons(b);
 }
 function requestPhoto(){
+  if(demo){placeBankPhoto();return;}
   if(busy||!ready)return;
   pendingPlacement={capture:game.captureView(),resume:playing};
   closeModal();game.pause();$('file').value='';$('file').click();
@@ -317,6 +387,10 @@ function nameRegion(name,kind){
   return !stem||/^(img|cam|pxl|dsc|photo|image|screenshot|\d{3})/i.test(stem)?defaults[kind]||'Photo Region':stem.slice(0,55);
 }
 async function prepareFile(file,onProgress){
+  if(isVideoFile(file)){
+    const {profile,thumb}=await prepareVideo(file,{onProgress,makeThumbnail:thumbnail});
+    return {name:file.name,title:nameRegion(file.name,profile.kind),thumb,profile};
+  }
   const pixels=await importPixels(file,isMobileRenderer()?1280:Infinity);
   try{
     const profile=await analyzeImage(pixels.image,{onProgress,originalWidth:pixels.width,originalHeight:pixels.height});
@@ -324,16 +398,16 @@ async function prepareFile(file,onProgress){
     return {name:file.name,title:nameRegion(file.name,profile.kind),thumb:thumbnail(pixels.image),profile};
   }finally{pixels.release();}
 }
-async function starterProfile(){
-  const profile=await sampleProfile('refinery');
+async function historicalStarter(){
+  const source=historyDeck[0],profile=await loadWalkProfile(source);
   profile.featureVersion=1;
-  if(isMobileRenderer())profile.imageURL='./assets/refinery-preview.jpg';
-  return profile;
+  return {id:0,name:source.title,title:source.title,historyId:source.id,thumb:source.image,profile};
 }
 async function installView(record,options={}){
   const index=await game.addViewPhoto(record.profile,record.capture,options);
   views[index]=record;
-  if(demo&&!record.bankSourceId&&(record.id==='region-0'||record.id==='launch'||record.id==='astronaut'||WALK_STOPS.some(stop=>record.id==='walk-'+stop.id))){
+  if(record.profile.video)clipViews.set(record.profile.video.id,record);
+  if(demo&&!archiveOffered&&!record.bankSourceId&&(record.id==='region-0'||record.historyId)){
     exampleBank.push(record);
     renderBank();
   }
@@ -346,10 +420,15 @@ async function persistView(record){
       const {bankSourceId,profile,thumb,...view}=record;
       // Each world owns its sources. Commit a new source and its pose together
       // so an interrupted placement cannot leave a view with dangling pixels.
-      const tx=library.transaction(['settings','regions'],'readwrite');
-      if(!savedBankSources.has(bankSourceId))tx.objectStore('settings').put({profile,thumb},'bank-source/'+bankSourceId);
-      tx.objectStore('regions').put({...view,bankSourceId});
-      await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);});
+      const missing=!savedBankSources.has(bankSourceId);
+      await withStorableMedia(library,missing?{profile,thumb}:undefined,source=>new Promise((resolve,reject)=>{
+        const tx=library.transaction(['settings','regions'],'readwrite');
+        tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error);
+        try{
+          if(source)tx.objectStore('settings').put(source,'bank-source/'+bankSourceId);
+          tx.objectStore('regions').put({...view,bankSourceId});
+        }catch(error){tx.abort();reject(error);}
+      }));
       savedBankSources.add(bankSourceId);
     }else{await writeStore(library,'regions',record);}
     setSaved(demo?'Sample atlas':'Saved locally');
@@ -371,7 +450,7 @@ async function restoreBankViews(records){
 async function placeBankPhoto(automatic=false){
   if(!ready)return;
   const capture=game.captureView(),source=bank.take(exampleBank);
-  if(!source){notice(bank.items.some(item=>item.file)?'The first bank photo is still preparing.':'Load photos in the Photo bank to use B.');return;}
+  if(!source){notice(bank.items.some(item=>item.file)?'The first item is still preparing.':'Load photos or videos in the Media bank to use B.');return;}
   walkingPlacement.placed(movementPose(),performance.now());
   if(automatic){
     const existing=views.findIndex(r=>r.bankSourceId===source.id&&sameAutoView(r.capture,capture));
@@ -412,8 +491,8 @@ async function addFile(file,placement){
     setLoading('Placing photo at '+heading(capture.yaw)+'…');await new Promise(resolve=>setTimeout(resolve,0));
     const index=await installView(r);
     record=r;displayRegion(index);updateViewHUD(latestStats);updatePathAction();
-    notice('Photo placed · '+heading(capture.yaw));
-  }catch(e){console.error(e);notice(e.name==='EncodingError'?'This browser could not decode that image. Try exporting it as JPEG, PNG, or WebP.':'Could not place this photograph. '+(e.message||'Try a different image.'));}
+    notice('Placed · '+heading(capture.yaw));
+  }catch(e){console.error(e);notice(e.name==='EncodingError'?'This browser could not decode that image. Try exporting it as JPEG, PNG, or WebP.':'Could not place this item. '+(e.message||'Try a different image.'));}
   finally{$('placement-status').hidden=true;busy=false;syncSuspension();buttons();}
   if(record){const saved=persistView(record);saveSettings();await saved;}
 }
@@ -423,13 +502,19 @@ function updatePathAction(){
   $('replay-placement').hidden=!game?.canReplayPlacement;
 }
 function wire(){
+  if(demo){
+    const archiveAction=document.querySelector('#touch-pad [data-act="photo"]');
+    archiveAction.textContent='Atlas';archiveAction.setAttribute('aria-label','Open historical atlas');archiveAction.dataset.act='history';
+    $('bank-entry').textContent='Use my media';$('bank-load').textContent='Open my media world';$('add-photo').textContent='Place from atlas';$('bank-rule').textContent='Walk 12 blocks or turn 35° to place the next historical image.';}
   icons();renderHotbar();compass(0);if(matchMedia('(pointer:coarse)').matches)document.querySelector('.entry-hint').textContent='Drag to aim · Use the arrows to walk';
   $('play').onclick=()=>game?.play();$('controls').onclick=showControls;$('notes').onclick=showNotes;$('view-atlas').onclick=showAtlas;$('view-world').onclick=()=>{closeModal();if(ready&&!busy)game.play();};
+  $('history-browser')?.addEventListener('click',showHistory);
   $('enlarge').onclick=()=>inspectImage();$('vision-info').onclick=()=>inspectImage('vision');$('close-modal').onclick=closeModal;
   $('modal').addEventListener('click',e=>{if(e.target===$('modal')){const b=$('modal').getBoundingClientRect();if(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)closeModal();}});
   $('modal').onclose=()=>{if(inspectedURL){URL.revokeObjectURL(inspectedURL);inspectedURL=null;}syncSuspension();$('view-atlas').classList.remove('active');$('view-world').classList.add('active');};
   $('add-photo').onclick=requestPhoto;$('file').onchange=()=>addFile($('file').files[0],pendingPlacement);
   function chooseBank(startWalking){
+    if(demo){location.assign('./?world=mine');return;}
     autoAfterPicker=startWalking||playing;
     game?.pause();$('bank-files').value='';$('bank-files').click();
   }
@@ -442,11 +527,17 @@ function wire(){
     bank.add(files);
     if(autoAfterPicker&&ready)game.play();
     autoAfterPicker=false;
-    notice('Preparing '+files.length+' photo'+(files.length===1?'':'s')+' on this device.');
+    notice('Preparing '+files.length+' item'+(files.length===1?'':'s')+' on this device.');
   };
   $('bank-files').oncancel=()=>{autoAfterPicker=false;};
   $('bank-auto').onchange=event=>setAutomatic(event.target.checked);
   $('auto-hud').onclick=()=>setAutomatic(!automaticEnabled());
+  $('clip-toggle').onclick=$('clip-hud').onclick=toggleClips;
+  $('clip-position').oninput=()=>{
+    if(!controlClip)return;
+    game.videoField.seek(controlClip.id,Number($('clip-position').value));
+    game.drawRequested=true;drawClipControls();queueSave();
+  };
   $('bank-next').onclick=()=>placeBankPhoto();
   $('file').oncancel=()=>{const resume=pendingPlacement?.resume;pendingPlacement=null;if(resume)game.play();};
   $('mobile-inspector').onclick=()=>$('inspector').classList.add('open');$('inspector-close').onclick=()=>$('inspector').classList.remove('open');
@@ -462,6 +553,9 @@ function wire(){
   window.addEventListener('keydown',e=>{
     if(e.repeat||$('modal').open||e.ctrlKey||e.metaKey||e.altKey||e.target?.isContentEditable)return;
     if(e.code==='KeyB'){e.preventDefault();placeBankPhoto();}
+    if(e.code==='KeyG'&&ready&&(exampleBank.length||bank.items.length)&&!e.target?.closest?.('input,textarea,select')){
+      e.preventDefault();setAutomatic(!automaticEnabled());
+    }
     if(e.code==='KeyU'){e.preventDefault();requestPhoto();}
     if(e.code==='Escape')$('inspector').classList.remove('open');
   });
@@ -469,45 +563,40 @@ function wire(){
   for(const el of document.querySelectorAll('#touch-pad [data-act]'))el.onclick=()=>{
     if(el.dataset.act==='bank')placeBankPhoto();
     else if(el.dataset.act==='photo')requestPhoto();
+    else if(el.dataset.act==='history')showHistory();
     else if(el.dataset.act==='pause')game.pause();
     else game.interact(el.dataset.act==='place');
   };
-  window.addEventListener('dragover',e=>e.preventDefault());window.addEventListener('drop',e=>{e.preventDefault();if(!ready||busy)return;const files=e.dataTransfer.files;if(files.length>1){bank.add(files);notice('Preparing '+files.length+' bank photos.');return;}const placement={capture:game.captureView(),resume:playing};closeModal();addFile(files[0],placement);});
+  window.addEventListener('dragover',e=>e.preventDefault());window.addEventListener('drop',e=>{e.preventDefault();if(!ready||busy)return;if(demo){notice('Open My media world to import files from your library.');return;}const files=e.dataTransfer.files;if(files.length>1){bank.add(files);notice('Preparing '+files.length+' bank items.');return;}const placement={capture:game.captureView(),resume:playing};closeModal();addFile(files[0],placement);});
   document.addEventListener('visibilitychange',()=>{if(document.hidden)saveSettings();});window.addEventListener('pagehide',saveSettings);
 }
 async function start(){
   wire();busy=true;buttons();
-  bank.open().then(()=>{
-    bankOpen=true;renderBank();
-  });
+  if(demo){bankOpen=true;renderBank();}
+  else bank.open().then(()=>{bankOpen=true;renderBank();});
   try{
     game=new Game($('scene'),{onStats,onPlay:playState,onSelect:selectedSlot,onEdit:queueSave,onNotice:notice});syncSuspension();
+    historyDeck=await loadHistory(seed);walkStops=makeWalk(historyDeck);
     let records=[],saved=null,storedViews=[];
-    try{
-      const legacyDb=autoDemo?'strata-autowalk-base-v1':walkDemo?'strata-walk-base-v1':demo?(requestedDemo==='views'?'strata-view-example-base-v1':'strata-sample-world-v1'):undefined;
-      const libraryName=autoDemo?'strata-autowalk-v1':walkDemo?(completedWalk?'strata-completed-walk-v2':'strata-photo-walk-v2'):demo?(requestedDemo==='views'?'strata-view-example-v1':'strata-view-migrated-example-v1'):'strata-directional-photos-v1';
-      [db,library]=await Promise.all([openDatabase(legacyDb),openDatabase(libraryName)]);
+    if(!demo)try{
+      [db,library]=await Promise.all([openDatabase(),openDatabase('strata-directional-photos-v1')]);
       const [oldRegions,oldSession,photos,session]=await Promise.all([readStore(db,'regions'),readStore(db,'settings','session'),readStore(library,'regions'),readStore(library,'settings','session')]);
       records=oldRegions;storedViews=photos.sort((a,b)=>a.created-b.created||String(a.id).localeCompare(String(b.id)));saved=session||oldSession;
     }catch{setSaved('Session only');}
-    if(records.length && !records[0].profile.depthLabel){
-      const first=records[0];first.profile=await starterProfile();await persistRegion(first,true);
+    if(records[0]&&!records[0].historyId&&!records[0].profile.imageBlob&&!records[0].profile.video){
+      const first=records[0];Object.assign(first,await historicalStarter());await persistRegion(first,true);
     }
     if(!records.length){
-      const profile=await starterProfile();
-      const r={id:0,name:'CAM15071.JPG',title:'Refinery Yard',thumb:'./assets/refinery-preview.jpg',profile};
-      setLoading('Building the refinery yard…');await new Promise(resolve=>setTimeout(resolve,0));r.anchor=await game.addRegion(profile);atlas.push(r);await persistRegion(r);
+      const r=videoDemo?{id:0,name:'express.mp4',title:'New Black Diamond Express',thumb:'./assets/express.jpg',profile:await expressProfile()}:await historicalStarter();
+      setLoading('Building '+r.title+'…');await new Promise(resolve=>setTimeout(resolve,0));r.anchor=await game.addRegion(r.profile);atlas.push(r);await persistRegion(r);
     }else{
       for(const r of records){
         setLoading('Restoring region '+pad(r.id+1)+'…');
         const p=r.profile;
-        if(!p.imageBlob && !p.imageURL)p.imageURL=r.id===0?'./assets/refinery.jpg':r.thumb;
-        if(r.id===0&&!p.imageBlob&&['./assets/refinery.jpg','./assets/refinery-preview.jpg'].includes(p.imageURL)){
-          p.imageURL=isMobileRenderer()?'./assets/refinery-preview.jpg':'./assets/refinery.jpg';
-        }
+        if(!p.imageBlob && !p.imageURL)p.imageURL=r.thumb;
         if(!p.featureVersion){
           try{
-            p.photoFeatures ||= r.id===0?await refineryFeatures():(await detectObjects(await decodeImage(r.thumb))).photoFeatures;
+            p.photoFeatures ||= (await detectObjects(await decodeImage(r.thumb))).photoFeatures;
             p.featureVersion=1;await persistRegion(r,true);
           }catch{ /* RGB, depth and detection matches also work on legacy photos. */ }
         }
@@ -517,50 +606,54 @@ async function start(){
     }
     const legacyViews=atlas.map((r,i)=>{
       game.goTo(i);
-      return {...r,id:'region-'+r.id,capture:game.captureView()};
+      let capture=game.captureView();
+      if(videoDemo&&i===0){const y=capture.y+7;capture={...capture,y,eye:{...capture.eye,y}};}
+      return {...r,id:'region-'+r.id,capture};
     });
     game.goTo(0);
     if(isMobileRenderer())game.beginViewRestore();
     for(const [i,r] of legacyViews.entries())await installView(r,{reference:i===0,animate:false});
-    if(walkDemo)walkOrigin=legacyViews[0].capture;
-    if(demo && !walkDemo && !autoDemo && (requestedDemo==='views'||atlas.length===1)){
+    walkOrigin=legacyViews[0].capture;
+    if(requestedDemo==='views'||requestedDemo==='morph'){
       const origin=legacyViews[0].capture;
-      const samples=[['launch','Launch Pad','Falcon 9 launch.jpg',22],['astronaut','Astronaut','Eileen Collins.png',46]];
-      for(const [name,title,file,offset] of samples){
-        if(storedViews.some(r=>r.id===name))continue;
-        setLoading('Placing '+title+'…');
-        const profile=await sampleProfile(name);
-        const record={id:name,created:offset,profile,title,name:file,thumb:profile.imageURL,capture:cameraStamp({eye:origin.eye,yaw:origin.yaw+offset*Math.PI/180,pitch:origin.pitch,fov:origin.fov,aspect:origin.aspect,near:origin.near,far:origin.far})};
-        storedViews.push(record);await persistView(record);
+      for(const [i,stop] of walkStops.slice(1,3).entries()){
+        const record=walkRecord(stop,await loadWalkProfile(stop));
+        record.capture=cameraStamp({eye:origin.eye,yaw:origin.yaw+[22,46][i]*Math.PI/180,pitch:origin.pitch,fov:origin.fov,aspect:origin.aspect,near:origin.near,far:origin.far});
+        storedViews.push(record);
       }
-      storedViews.sort((a,b)=>a.created-b.created);
     }
     await restoreBankViews(storedViews);
     const newExample=requestedDemo==='views'&&!saved?.player&&storedViews.length===2;
     for(const r of storedViews){
       setLoading('Restoring '+r.title+'…');
-      await installView(r,{prepareReplay:r===storedViews.at(-1),animate:newExample&&r.id==='astronaut'&&!matchMedia('(prefers-reduced-motion: reduce)').matches});
+      await installView(r,{prepareReplay:r===storedViews.at(-1),animate:newExample&&r===storedViews.at(-1)&&!matchMedia('(prefers-reduced-motion: reduce)').matches});
     }
     if(walkDemo){
       $('walk-link').hidden=true;
       nextWalkIndex();
-      if(completedWalk)while(walkIndex<WALK_STOPS.length){
-        const stop=WALK_STOPS[walkIndex];setLoading('Placing '+stop.title+' · '+(walkIndex+1)+' of '+WALK_STOPS.length+'…');
+      if(completedWalk)while(walkIndex<walkStops.length){
+        const stop=walkStops[walkIndex];setLoading('Placing '+stop.title+' · '+(walkIndex+1)+' of '+walkStops.length+'…');
         const record=walkRecord(stop,await loadWalkProfile(stop));
-        await installView(record,{animate:false,prepareReplay:walkIndex===WALK_STOPS.length-1});nextWalkIndex();
+        await installView(record,{animate:false,prepareReplay:walkIndex===walkStops.length-1});nextWalkIndex();
         await persistView(record);
       }
     }
     if(isMobileRenderer())await game.finishViewRestore();
     Object.assign(settings,{mode:saved?.mode||'hybrid',opacity:saved?.opacity??65,fov:saved?.fov||legacyViews[0].capture.fov});
     if(typeof saved?.sampleAutomatic==='boolean')sampleAutomatic=saved.sampleAutomatic;
+    if(typeof saved?.walkAutomatic==='boolean')walkAutomatic=saved.walkAutomatic;
+    if(saved?.clipsPlaying===false)game.videoField.setPlaying(false);
+    for(const [id,time] of Object.entries(saved?.clipTimes||{})){
+      if(clipViews.has(id)&&Number.isFinite(time))game.videoField.seek(id,time);
+    }
     applySettings();
     if(saved?.player)game.restoreState(saved.player);
-    else if(walkDemo)game.turnView(Math.atan2(WALK_STOPS[1].x,-WALK_STOPS[1].z));
-    else if(demo && storedViews.some(r=>r.id==='launch'))game.turnView(22*Math.PI/180);
+    else if(walkDemo)game.turnView(Math.atan2(walkStops[1].x,-walkStops[1].z));
+    else if(videoDemo)game.goToStamp(0);
+    else if(requestedDemo==='views'||requestedDemo==='morph')game.turnView(22*Math.PI/180);
     let selectedIndex=views.findIndex(v=>v.id===saved?.selectedViewId);
     if(overlapStudy){
-      selectedIndex=views.findIndex(v=>v.id==='walk-arch');
+      selectedIndex=views.findIndex(v=>v.historyId===walkStops[3].id);
       if(selectedIndex>=0){
         game.goToStamp(selectedIndex);game.flying=false;
         game.turnView(49*Math.PI/180-game.yaw,Math.PI/180-game.pitch);
@@ -568,14 +661,14 @@ async function start(){
     }
     displayRegion(selectedIndex>=0?selectedIndex:demo&&!walkDemo?Math.min(1,views.length-1):0);updateViewHUD(latestStats);
     ready=true;busy=false;syncSuspension();buttons();updatePathAction();$('load').hidden=true;$('connection').textContent='World ready';
-    if(demo){$('demo-back').hidden=false;if(library&&!saveFailed)setSaved('Sample atlas');}
-    if(autoDemo){
-      $('auto-link').hidden=true;
-      document.querySelector('.entry-hint').textContent='Walk or turn to place the next photo';
-      loadAutoSamples();
+    if(demo){
+      $('demo-back').hidden=false;setSaved('Public atlas');offerArchive();
+      if(autoDemo)$('auto-link').hidden=true;
+      if(videoDemo)$('film-link').hidden=true;
+      document.querySelector('.entry-hint').textContent=videoDemo?'The train moves as you watch · Enter to explore':'Walk or turn to place the next historical image';
     }
     if(walkDemo){
-      document.querySelector('.entry-hint').textContent=walkIndex<WALK_STOPS.length?'Walk toward the next photo · Select its waypoint to jump there':'Explore 11 photos · Photo atlas recalls any viewpoint';
+      document.querySelector('.entry-hint').textContent=walkIndex<walkStops.length?'Walk toward the next photo · Select its waypoint to jump there':'Explore 11 photos · Photo atlas recalls any viewpoint';
       if(overlapStudy)document.querySelector('.entry-hint').textContent='Walk forward into the overlap, then back to reverse the morph';
       if(latestStats)trackWalk(latestStats);
     }

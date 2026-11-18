@@ -8,6 +8,7 @@ import { fuseAppearance } from './photo-fusion.js?v=3.5';
 import { beginFusion } from './fusion-task.js';
 import { correspondence } from './morph.js';
 import { buildPhotoMotion, zeroMotionTexture, motionLimit, motionSite, viewerAffinity } from './photo-motion.js';
+import {videoSamples,videoUniforms,videoVertexGL,videoFragmentGL,videoDisplacementLimit} from './video-field.js';
 
 const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
 const mix=(a,b,t)=>a+(b-a)*t;
@@ -194,7 +195,7 @@ export function computePhotoSamples(record){
   const grid=makeRayGrid(record);
   return {grid,image:fuseAppearance(record,grid)};
 }
-const transitionVertex=`
+const transitionVertex=videoVertexGL+`
   attribute vec3 startCenter;attribute vec4 startPigment;
   uniform float placement,hasPhotoMotion;
   uniform vec3 eye,forward,across,upAxis,observerEye;
@@ -203,20 +204,25 @@ const transitionVertex=`
   varying vec3 motionColor,restPoint;
   varying vec4 initialPigment;varying float movement;
   float eased(float t){return t*t*(3.-2.*t);}
+  vec2 sourceRayUV(vec3 center){
+    vec3 d=center-eye;
+    return vec2(.5)+vec2(1.,-1.)*(vec2(dot(d,across),dot(d,upAxis))/max(.00001,dot(d,forward))-offset)/aperture;
+  }
   vec3 travel(vec3 center){
     motionColor=vec3(0.);
-    if(hasPhotoMotion<.5)return vec3(0.);
-    vec3 d=center-eye;
-    vec2 uv=vec2(.5)+vec2(1.,-1.)*(vec2(dot(d,across),dot(d,upAxis))/max(.00001,dot(d,forward))-offset)/aperture;
-    vec2 st=(clamp(uv,0.,1.)*(motionSize-1.)+.5)/motionSize;
     float phase=eased(placement);
+    vec2 uv=sourceRayUV(center);
+    vec3 temporal=videoMovement(center,uv)*phase;
+    if(hasPhotoMotion<.5)return temporal;
+    vec2 st=(clamp(uv,0.,1.)*(motionSize-1.)+.5)/motionSize;
     motionColor=texture2D(motionPigment,st).rgb*phase;
     vec3 shift=texture2D(motionOffsets,st).xyz;
     // The cells within building reach stay registered with the collision
     // lattice. The intervening band cannot move a distant block into reach.
     float range=length(center-observerEye);
     float keep=smoothstep(9.,24.,range)*min(1.,max(0.,range-9.)/max(.001,length(shift)));
-    return shift*(keep*phase);
+    vec3 combined=shift*(keep*phase)+temporal;
+    return combined*min(1.,max(0.,range-9.)/max(.001,length(combined)));
   }
 `;
 const vsCubes=transitionVertex+`
@@ -259,7 +265,7 @@ const transitionFragment=`
   }
   vec3 transportedColor(vec3 c){float blend=movement>.5?smoothstep(.02,.93,placement):1.;return mix(initialPigment.rgb,c,blend);}
 `;
-const fsCubes=projectionGL+transitionFragment+`
+const fsCubes=videoFragmentGL+projectionGL+transitionFragment+`
   uniform float materialGrain;
   varying vec3 worldP,centerP,norm;
   void main(){
@@ -269,7 +275,8 @@ const fsCubes=projectionGL+transitionFragment+`
     float facet=clamp(materialGrain+sampleColor.a*.40+.23*smoothstep(1.,9.,length(cameraPosition-eye)),0.,.95);
     vec3 pigment=texture2D(radiance,clamp(photoCoords(centerP).xy,0.,1.)).rgb;
     float shade=norm.y>.5?1.10:norm.y<-.5?.65:abs(norm.x)>.5?.76:.99;
-    gl_FragColor=vec4(transportedColor(clamp(mix(color,pigment,facet)+motionColor,0.,1.)*mix(1.,shade,facet)),1.);
+    vec3 movie=videoColorDelta(mix(uvz.xy,photoCoords(centerP).xy,facet))*placement;
+    gl_FragColor=vec4(transportedColor(clamp(mix(color,pigment,facet)+motionColor+movie,0.,1.)*mix(1.,shade,facet)),1.);
     #include <colorspace_fragment>
   }`;
 const vsSurfels=transitionVertex+`
@@ -282,7 +289,7 @@ const vsSurfels=transitionVertex+`
     worldP=restPoint+travel(surfacePoint);
     gl_Position=projectionMatrix*viewMatrix*vec4(worldP,1.);
   }`;
-const fsSurfels=projectionGL+transitionFragment+`
+const fsSurfels=videoFragmentGL+projectionGL+transitionFragment+`
   uniform float splatOpacity;
   varying vec2 kernel;varying vec3 worldP;
   void main(){
@@ -290,7 +297,7 @@ const fsSurfels=projectionGL+transitionFragment+`
     if(outside(photoCoords(worldP)))discard;vec3 uvz=photoCoords(restPoint);
     vec4 sampleColor=texture2D(radiance,uvz.xy);vec3 color=sampleColor.rgb;
     float vis=visibility(worldP);if(vis<.001)discard;
-    gl_FragColor=vec4(transportedColor(clamp(color+motionColor,0.,1.)),vis*splatOpacity*(1.-.29*sampleColor.a)*exp(-.5*radius));
+    gl_FragColor=vec4(transportedColor(clamp(color+motionColor+videoColorDelta(uvz.xy)*placement,0.,1.)),vis*splatOpacity*(1.-.29*sampleColor.a)*exp(-.5*radius));
     #include <colorspace_fragment>
   }`;
 function uniforms(r,tex,motion){
@@ -428,24 +435,26 @@ async function buildLayer(r,g,atlas,active,animate,image) {
     }else{splatStarts.push(x,y,z);splatPigments.push(0,0,0,0);}
   }
   const motion=buildPhotoMotion(r,g,back,rawDepth);
+  const video=videoSamples(g),defines={STRATA_VIDEO_SLOTS:Math.min(2,video.length)};
   const uniformsUv=uniforms(r,tex,motion);uniformsUv.placement.value=animate?0:1;
+  Object.assign(uniformsUv,videoUniforms(video.length));
   const compact=r.budget.rayScale<1;
   const solid=new THREE.Mesh(instanced(compact?facingBox:box,{cellCenter:coords,startCenter:starts,startPigment:pigments},cells.size),
-    new THREE.ShaderMaterial({defines:compact?{CAMERA_FACING_CUBE:1}:{},uniforms:uniformsUv,vertexShader:vsCubes,fragmentShader:fsCubes,toneMapped:false,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
+    new THREE.ShaderMaterial({defines:compact?{...defines,CAMERA_FACING_CUBE:1}:defines,uniforms:uniformsUv,vertexShader:vsCubes,fragmentShader:fsCubes,toneMapped:false,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
   solid.userData.worldAxisCubes=true;solid.userData.stampId=r.id;solid.name='World-axis photo voxels';solid.frustumCulled=false;
   const gaussian=new THREE.Mesh(instanced(square,{surfacePoint:surfels,tangentU:tangents,tangentV:bitangents,startCenter:splatStarts,startPigment:splatPigments},surfels.length/3),
-    new THREE.ShaderMaterial({uniforms:uniformsUv,vertexShader:vsSurfels,fragmentShader:fsSurfels,transparent:true,depthTest:true,depthWrite:false,side:THREE.DoubleSide,forceSinglePass:true,toneMapped:false}));
+    new THREE.ShaderMaterial({defines,uniforms:uniformsUv,vertexShader:vsSurfels,fragmentShader:fsSurfels,transparent:true,depthTest:true,depthWrite:false,side:THREE.DoubleSide,forceSinglePass:true,toneMapped:false}));
   gaussian.userData.gaussianSurfels=true;gaussian.userData.stampId=r.id;gaussian.name='Depth-oriented Gaussian surfels';gaussian.frustumCulled=false;gaussian.renderOrder=24;
   const root=new THREE.Group();root.name='Live photo '+r.id;root.add(solid,gaussian);
   const bounds=new THREE.Box3();
   const pt=new THREE.Vector3();
   for(const a of [coords,starts,surfels])for(let i=0;i<a.length;i+=3)bounds.expandByPoint(pt.set(a[i],a[i+1],a[i+2]));
-  if(!bounds.isEmpty())bounds.expandByScalar(3+(motion?motionLimit:0));
+  if(!bounds.isEmpty())bounds.expandByScalar(3+(motion?motionLimit:0)+(video.length?videoDisplacementLimit:0));
   const corners=[];for(const depth of [s.near,Math.min(MAX_DEPTH+4,s.far)])for(const v of [0,1])for(const u of [0,1]){
     const k=back(s,u,v,depth,{});corners.push(new THREE.Vector3(k.x,k.y,k.z));
   }
-  const layer={root,solid,gaussian,cells,motion,texture:tex,uniforms:uniformsUv,image,bounds,corners,resident:true,lod:0,overlap:r.neighbors.length>0,
-    depths:g.depths,w:g.w,h:g.h,dispose(){motion?.dispose();tex.dispose();solid.material.dispose();gaussian.material.dispose();solid.geometry.dispose();gaussian.geometry.dispose();}};
+  const layer={root,solid,gaussian,cells,motion,videoSamples:video,texture:tex,uniforms:uniformsUv,image,bounds,corners,resident:true,lod:0,overlap:r.neighbors.length>0,
+    depths:g.depths,w:g.w,h:g.h,dispose(){for(const item of video)item.texture.dispose();motion?.dispose();tex.dispose();solid.material.dispose();gaussian.material.dispose();solid.geometry.dispose();gaussian.geometry.dispose();}};
   changeUniforms(layer,active.s);return layer;
 }
 function gridDepth(r,u,v){
