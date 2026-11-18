@@ -246,13 +246,19 @@ export class VideoField {
       const ranked=layer.videoSamples.map(sample=>{
         const affinity=viewerAffinity(eye,sample.record.motionSite||sample.record.s);
         const priority=sample.maximum*Math.pow(affinity,.34);
-        const id=sample.clip.id;priorities.set(id,Math.max(priorities.get(id)||0,priority));
         return {sample,priority};
       }).sort((a,b)=>b.priority-a.priority);
+      // Each layer has two shader slots. On desktop, spend texture uploads only
+      // on films a visible layer will actually bind. Phone can fill a vacant
+      // slot from another neighbor when it shares the four-source working set.
+      for(const {sample,priority} of this.mobile?ranked:ranked.slice(0,2)){
+        const id=sample.clip.id;
+        priorities.set(id,Math.max(priorities.get(id)||0,priority));
+      }
       visible.push({layer,ranked});
     }
     const byPriority=[...priorities].sort((a,b)=>b[1]-a[1]);
-    const live=new Set(byPriority.slice(0,this.mobile?4:8).map(([id])=>id));
+    const live=new Set((this.mobile?byPriority.slice(0,4):byPriority).map(([id])=>id));
     // Avoid bouncing one hardware decoder between nearly tied sources as the
     // viewer walks along their boundary. All samples still share their clocks.
     const decoderRank=byPriority.filter(([id])=>live.has(id)).map(([id,score])=>
