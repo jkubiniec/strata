@@ -40,3 +40,35 @@ test('a video painted at an existing camera moves its shared shell and keeps one
     assert.equal(field.hasActivePlayback,false);
   }finally{field.dispose();atlas.dispose();}
 });
+
+test('eleven visible desktop films animate together while phone keeps its four-source budget', async()=>{
+  const still={width:240,height:160,detail:.4,gridW:w,gridH:h,rgb:rgb(90),depth:new Float32Array(w*h).fill(.4),skyMask:new Uint8Array(w*h)};
+  const entries=Array.from({length:11},(_,id)=>({
+    id,frame:cameraStamp({eye:{x:200*id,y:5,z:0},aspect:1.5,fov:45}),
+    profile:{...still,video:{id:'film-'+id,duration:3,width:240,height:160,gridW:w,gridH:h,
+      frames:[frame(0,90,90),frame(1,100+id,120+id),frame(2,175,220)]}}
+  }));
+  const atlas=new ViewVolumeAtlas(phoneBudget);
+  const desktop=new VideoField(),phone=new VideoField(true),camera={position:{x:0,y:5,z:0}};
+  try{
+    await atlas.restore(entries);
+    desktop.setPlaying(false);
+    for(const {profile} of entries)desktop.seek(profile.video.id,1.25);
+    desktop.update(atlas,camera);
+    assert.equal(desktop.activeCount,11);
+    for(const {id,layer} of atlas.records){
+      const uniforms=layer.solid.material.uniforms;
+      assert.ok(uniforms.videoGain0.value>0);
+      assert.equal(uniforms.videoMix0.value,.25);
+      assert.deepEqual([...uniforms.videoA0.value.image.data.slice(0,4)],[120+id,120+id,120+id,100+id]);
+    }
+    phone.update(atlas,camera);
+    assert.equal(phone.activeCount,4);
+    assert.equal(atlas.records.filter(r=>r.layer.uniforms.videoGain0.value>0).length,4);
+    for(const {layer} of atlas.records.slice(6))layer.root.visible=false;
+    desktop.update(atlas,camera,performance.now()+2000);
+    assert.equal(desktop.activeCount,6);
+    assert.equal(desktop.sources.get('film-10').textures,null);
+    assert.equal(desktop.time('film-10'),1.25);
+  }finally{desktop.dispose();phone.dispose();atlas.dispose();}
+});
