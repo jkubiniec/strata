@@ -1,6 +1,8 @@
 // Touch laptops with a primary mouse keep desktop rendering. iPadOS can
 // present a desktop user agent, including when a trackpad is attached.
 export function isMobileRenderer() {
+  const query=new URLSearchParams(globalThis.location?.search);
+  if(query.get('demo')==='phone'||query.get('platform')==='phone')return true;
   const nav=globalThis.navigator;
   if(!nav)return false;
   return /iPhone|iPad|iPod/i.test(nav.userAgent||'') ||

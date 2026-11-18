@@ -52,11 +52,62 @@ export function openDatabase(name='strata-photo-worlds-v1'){
     req.onerror=()=>reject(req.error);req.onsuccess=()=>resolve(req.result);req.onblocked=()=>reject(new Error('Another tab is updating the photo atlas.'));
   });
 }
+// Some WebKit storage contexts can store ArrayBuffers but reject Blob and File.
+// Retry those records in a portable representation and revive them on reads.
+const bufferDatabases=new WeakMap();
+const binaryKeys=['file','imageBlob','blob'];
+function mapMedia(record,convert){
+  if(!record||typeof record!=='object')return record;
+  let result=record;
+  for(const key of [...binaryKeys,'profile','video']){
+    if(!record[key])continue;
+    const value=binaryKeys.includes(key)?convert(record[key]):mapMedia(record[key],convert);
+    if(value!==record[key]){if(result===record)result={...record};result[key]=value;}
+  }
+  return result;
+}
+async function packMedia(record){
+  const pending=[];
+  const result=mapMedia(record,blob=>{
+    if(!(blob instanceof Blob))return blob;
+    const wrapped={strataBinary:1,type:blob.type,name:blob.name,lastModified:blob.lastModified};
+    pending.push(blob.arrayBuffer().then(bytes=>{wrapped.bytes=bytes;}));return wrapped;
+  });
+  await Promise.all(pending);return result;
+}
+function reviveMedia(record){
+  return mapMedia(record,value=>{
+    if(value.strataBinary!==1)return value;
+    return typeof value.name==='string'?new File([value.bytes],value.name,{type:value.type,lastModified:value.lastModified}):
+      new Blob([value.bytes],{type:value.type});
+  });
+}
+export async function withStorableMedia(db,record,write){
+  if(!bufferDatabases.has(db)){
+    try{return await write(record);}catch(error){
+      if(error?.name!=='DataCloneError')throw error;
+      if(!bufferDatabases.has(db))bufferDatabases.set(db,Promise.resolve());
+    }
+  }
+  // Keep a large multi-select within the phone’s memory budget.
+  const pending=bufferDatabases.get(db).then(async()=>write(await packMedia(record)));
+  bufferDatabases.set(db,pending.catch(()=>{}));
+  return pending;
+}
 export function readStore(db,name,key){
-  return new Promise((resolve,reject)=>{const store=db.transaction(name).objectStore(name),req=key===undefined?store.getAll():store.get(key);req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
+  return new Promise((resolve,reject)=>{
+    const store=db.transaction(name).objectStore(name),req=key===undefined?store.getAll():store.get(key);
+    req.onsuccess=()=>{try{resolve(key===undefined?req.result.map(reviveMedia):reviveMedia(req.result));}catch(e){reject(e);}};
+    req.onerror=()=>reject(req.error);
+  });
 }
 export function writeStore(db,name,item,key,insert=false){
-  return new Promise((resolve,reject)=>{const tx=db.transaction(name,'readwrite');const store=tx.objectStore(name);if(insert)store.add(item,key);else store.put(item,key);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});
+  return withStorableMedia(db,item,record=>new Promise((resolve,reject)=>{
+    const tx=db.transaction(name,'readwrite'),store=tx.objectStore(name);
+    tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error);
+    try{if(insert)store.add(record,key);else store.put(record,key);}
+    catch(error){tx.abort();reject(error);}
+  }));
 }
 
 export function atlasMap(records,position){

@@ -4,6 +4,7 @@ import { correspondence, createMorphField, MorphEditVolume } from './morph.js';
 import { createPhotoSurface } from './reconstruction.js';
 import { ViewVolumeAtlas, cameraStamp, captureStamp } from './view-volume.js';
 import { StampClip } from './stamp-clip.js';
+import { VideoField } from './video-field.js';
 import { BLOCKS, VoxelWorld, photoVerticalSlope, PHOTO_HORIZON, photoDistance } from './world.js';
 
 const clamp = THREE.MathUtils.clamp;
@@ -484,6 +485,7 @@ export class Game {
     this.canvas = canvas;
     this.callbacks = callbacks;
     this.mobile = isMobileRenderer();
+    this.videoField = new VideoField(this.mobile);
     this.budget = this.mobile?phoneBudget:desktopBudget;
     this.raster = new AdaptiveRaster();
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !this.mobile, alpha: false, powerPreference: 'high-performance' });
@@ -597,6 +599,9 @@ export class Game {
     const scale = Math.min(window.devicePixelRatio || 1, this.budget.pixelRatio, Math.sqrt(this.budget.rasterPixels / (width*height)))*this.raster.scale;
     if (this.drawSize[0] === width && this.drawSize[1] === height && this.drawSize[2] === scale) return;
     if(this.drawSize[0]!==width||this.drawSize[1]!==height)this.recalledAspect=null;
+    if((this.drawSize[0]>this.drawSize[1])!==(width>height)){
+      this.drag=null;this.heldAction=null;
+    }
     this.drawSize = [width, height, scale];
     this.drawRequested = true;
     this.renderer.setDrawingBufferSize(width,height,scale);
@@ -631,8 +636,12 @@ export class Game {
       if (controls.has(event.code)) this.moveKey(event.code, false);
     });
     listen(window, 'blur', () => this.pause());
-    listen(window, 'pagehide', () => this.pause());
-    listen(document, 'visibilitychange', () => { if (document.hidden) this.pause(); });
+    listen(window, 'pagehide', () => { this.pause(); this.videoField.setSuspended(true); });
+    listen(window, 'pageshow', () => this.videoField.setSuspended(this.suspended || document.hidden));
+    listen(document, 'visibilitychange', () => {
+      if (document.hidden) this.pause();
+      this.videoField.setSuspended(this.suspended || document.hidden);
+    });
     listen(document, 'pointerlockchange', () => {
       const locked = document.pointerLockElement === this.canvas;
       if (locked && !this.playing) {
@@ -899,7 +908,7 @@ export class Game {
     this.playing = true;
     this.canvas.focus?.({ preventScroll: true });
     this.notify('onPlay', true);
-    if (!window.matchMedia('(pointer: coarse)').matches && this.canvas.requestPointerLock) {
+    if (document.documentElement.dataset.platform!=='phone' && !window.matchMedia('(pointer: coarse)').matches && this.canvas.requestPointerLock) {
       // Embedded viewers can deny pointer lock. Drag-to-look uses the same
       // camera path and remains available in that case.
       try { this.canvas.requestPointerLock()?.catch?.(() => {}); } catch {}
@@ -921,6 +930,7 @@ export class Game {
   setSuspended(suspended) {
     if (this.suspended === !!suspended) return;
     this.suspended = !!suspended;
+    this.videoField.setSuspended(this.suspended || document.hidden);
     if (this.suspended) {
       this.pause();
       cancelAnimationFrame(this.frameId);
@@ -1445,7 +1455,7 @@ export class Game {
     this.lastFrame = now;
     if (document.hidden) return;
     const lastRegion = this.regions[this.regions.length-1];
-    const idle = !this.playing && !this.particles.length && !this.world.queue.length && !this.viewAtlas.animating &&
+    const idle = !this.playing && !this.videoField.hasActivePlayback && !this.particles.length && !this.world.queue.length && !this.viewAtlas.animating &&
       lastRegion && now-lastRegion.field.created > 1200;
     if (idle && !this.drawRequested && now-this.lastDraw < 150) return;
     this.drawRequested = false;
@@ -1476,6 +1486,8 @@ export class Game {
       this.statsTime += dt;
       if (this.statsTime > .16) { this.statsTime = 0; this.emitStats(); }
     }
+    this.videoField.update(this.viewAtlas,this.camera,now);
+    if(this.liveViews)this.world.terrainProjection.update(this.camera,this.viewAtlas,this.videoField,this.mode);
     this.renderer.render(this.scene,this.camera);
   }
 
@@ -1535,6 +1547,7 @@ export class Game {
     cancelAnimationFrame(this.frameId);
     this.disposeEvents.abort();
     this.resizeObserver.disconnect();
+    this.videoField.dispose();
     this.world.dispose();this.viewAtlas.dispose();this.stampClip.dispose();
     for (const { field, surface } of this.regions) {field.dispose();surface.dispose();}
     this.liveField?.dispose();

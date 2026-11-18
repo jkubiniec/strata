@@ -8,12 +8,7 @@ async function readStudy(url) {
   return {meta, buffer, offset:end};
 }
 
-export async function refineryFeatures() {
-  const {meta, buffer, offset} = await readStudy('./assets/refinery-features.bin');
-  return {...meta, values:new Int8Array(buffer, offset)};
-}
-
-export async function sampleProfile(name='launch') {
+export async function sampleProfile(name) {
   const {meta, buffer, offset} = await readStudy('./assets/'+name+'-study.bin');
   const {featureShape, ...profile} = meta;
   const n = profile.gridW * profile.gridH;
@@ -23,10 +18,28 @@ export async function sampleProfile(name='launch') {
   const depth = new DataView(buffer, offset + 4*n, 2*n);
   profile.depth = Float32Array.from({length:n}, (_,i) => depth.getUint16(i*2, true) / 65535);
   profile.photoFeatures = {...featureShape, values:new Int8Array(buffer, offset + 6*n)};
-  profile.imageURL = './assets/'+name+(name==='astronaut'?'.png':'.jpg');
+  profile.imageURL = './assets/'+name+'.jpg';
   return profile;
 }
-export const launchProfile = () => sampleProfile('launch');
+
+
+export async function expressProfile() {
+  const [profile, study, response] = await Promise.all([
+    sampleProfile('express'), readStudy('./assets/express-motion.bin'), fetch('./assets/express.mp4')
+  ]);
+  if (!response.ok) throw new Error('Could not open the train film.');
+  const {meta, buffer} = study;
+  const n = meta.gridW * meta.gridH;
+  let offset = study.offset;
+  const frames = meta.frames.map(frame => {
+    const rgb = new Uint8Array(buffer, offset, n*3);
+    const depth = new Uint8Array(buffer, offset+n*3, n);
+    offset += n*4;
+    return {...frame,rgb,depth};
+  });
+  profile.video = {...meta,frames,blob:await response.blob()};
+  return profile;
+}
 
 async function isPhoneHEIF(file) {
   if (/^image\/hei[cf](?:-sequence)?$/i.test(file.type) || /\.hei[cf]s?$/i.test(file.name)) return true;

@@ -91,12 +91,17 @@ dialog:has(.guide-editor){width:min(830px,calc(100% - 28px))}
 .bank-switch input::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#a7b39b}
 .bank-switch input:checked{background:var(--acid);border-color:var(--acid)}.bank-switch input:checked::after{left:15px;background:#263219}
 #bank-rule{margin:0;color:var(--muted);font-size:11px;line-height:1.45}#auto-link{margin-top:9px;color:#d6e7c7}
-#auto-hud,#bank-entry{display:none}
+#auto-hud,#clip-hud,#bank-entry{display:none}
+#auto-hud,#clip-hud{position:absolute;right:max(10px,env(safe-area-inset-right));z-index:2;align-items:center;justify-content:center;gap:2px;min-height:44px;border:1px solid #ffffff68;border-radius:5px;padding:5px 10px;background:#1b241de6;color:#fff;font:11px var(--mono)}
+#auto-hud{top:10px;flex-direction:column}#auto-ready{color:#c9d4c4;font-size:9px}#auto-hud[aria-pressed=true] #auto-mode{color:var(--acid)}
+.playing #auto-hud,.playing #clip-hud{display:flex}#clip-hud{top:59px}#clip-toggle{min-height:42px;width:100%}#clip-name{overflow-wrap:anywhere}
+#film-link,#auto-link{display:block;margin-top:9px;color:#d6e7c7}
+@media(pointer:fine){#auto-hud{display:flex}}
+
 @media(pointer:coarse){
   #bank-entry{display:flex;align-items:center;justify-content:center;gap:7px;min-height:44px;padding:5px 15px;color:#f2f8e9;background:#25301fe8;border:1px solid #abb79d;border-radius:5px;font-size:12px;font-weight:600}
   #bank-entry i{width:15px;height:15px;color:var(--acid)}
   .playing #auto-hud{display:flex;position:absolute;right:max(10px,env(safe-area-inset-right));top:10px;z-index:2;flex-direction:column;align-items:flex-start;justify-content:center;min-height:44px;min-width:76px;padding:5px 9px;gap:2px;border:1px solid #ffffff68;border-radius:5px;color:#fff;background:#1b241de6;font:11px var(--mono)}
-  #auto-hud[aria-checked=true] #auto-mode{color:var(--acid)}#auto-ready{font-size:9px;color:#c9d4c4}
   .bank-actions .sample-path,.bank-switch{min-height:44px}
   #touch-pad button{min-width:42px;height:44px}.dpad{grid-template-columns:repeat(3,42px)}
   #touch-pad{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}

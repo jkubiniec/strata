@@ -1,4 +1,3 @@
-import { refineryFeatures } from './photo-assets.js';
 import { isMobileRenderer } from './performance-profile.js';
 const clamp = (value, low = 0, high = 1) => Math.min(high, Math.max(low, value));
 const detectorSize = 416;
@@ -391,17 +390,6 @@ async function runDepthModel(image, width, height, onProgress) {
   }
 }
 
-async function storedStarterAnalysis() {
-  const response = await fetch(new URL('./vendor/vision/refinery-depth.bin', import.meta.url));
-  if (!response.ok) throw new Error('Stored refinery analysis unavailable');
-  const bytes = await response.arrayBuffer(), header = new DataView(bytes);
-  const w = header.getUint16(0, true), h = header.getUint16(2, true);
-  if (w !== 518 || h !== 350 || bytes.byteLength !== 4 + 2 * w * h) throw new Error('Unexpected refinery analysis');
-  // Original detector output on assets/refinery.jpg, alongside its precomputed depth.
-  const detections = [{ label: 'train', x: 0.01262167, y: 0.66430765, w: 0.34172511, h: 0.12133890, score: 0.43791778 }];
-  return { depth: { w, h, values: new Uint16Array(bytes, 4) }, detections, photoFeatures: await refineryFeatures() };
-}
-
 function applyMonocularDepth(depth, sky, w, h, map) {
   const values = map.values;
   const view = map.viewport || { x: 0, y: 0, w: 1, h: 1 };
@@ -424,12 +412,8 @@ export async function analyzeImage(image, { starter = false, onProgress, origina
   const inputWidth = image.naturalWidth || image.width, inputHeight = image.naturalHeight || image.height;
   const width = originalWidth || inputWidth, height = originalHeight || inputHeight;
   if (!(width > 0 && height > 0)) throw new Error('The photo has no readable pixels.');
-  onProgress?.(starter ? 'Reading the refinery photo study' : 'Reading objects with Tiny YOLOv3');
-  let stored;
-  if (starter && width === 6000 && height === 4000) {
-    try { stored = await storedStarterAnalysis(); } catch { /* Recompute if cached assets are unavailable. */ }
-  }
-  const objectTask = stored ? Promise.resolve(stored) : detectObjects(image, inputWidth, inputHeight);
+  onProgress?.('Reading objects with Tiny YOLOv3');
+  const objectTask=detectObjects(image,inputWidth,inputHeight);
   const learned = objectTask.then(result => ({ ...result, available: true }), error => {
     console.warn('Using local image analysis without object detections.', error.message);
     return { detections: [], available: false };
@@ -444,9 +428,9 @@ export async function analyzeImage(image, { starter = false, onProgress, origina
   const { detections, photoFeatures, available } = await learned;
   const kind = sceneKind(signals, sky, detections, starter);
   if (kind === 'interior' || (kind === 'object' && (sky.blue < 0.1 || sky.fraction > 0.53))) { sky.mask.fill(0); sky.horizon = 0.46; }
-  onProgress?.(stored ? 'Placing photo surfaces' : 'Loading the local depth model');
+  onProgress?.('Loading the local depth model');
   await new Promise(resolve => setTimeout(resolve, 0));
-  const modelDepth = stored ? Promise.resolve(stored.depth) : runDepthModel(image, inputWidth, inputHeight, onProgress).catch(error => {
+  const modelDepth = runDepthModel(image, inputWidth, inputHeight, onProgress).catch(error => {
     console.warn('Using color and edge depth cues.', error.message);
     return undefined;
   });

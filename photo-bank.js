@@ -51,6 +51,7 @@ export class PhotoBank {
     this.byId=new Map();
     this.lastId=null;
     this.automatic=true;
+    this.pendingWrites=new Map();
     this.preparing=false;
     this.saving=true;
   }
@@ -95,7 +96,7 @@ export class PhotoBank {
       this.items.push(item);
       this.byId.set(item.id,item);
       // Persist the source first so an interrupted analysis can resume on reload.
-      this.save('regions',item);
+      this.pendingWrites.set(item.id,this.save('regions',{...item}));
     }
     this.changed();
     this.preparePending();
@@ -110,6 +111,8 @@ export class PhotoBank {
         try{Object.assign(item,await this.prepare(item.file));}
         catch{item.failed=true;}
         delete item.file;
+        await this.pendingWrites.get(item.id);
+        this.pendingWrites.delete(item.id);
         await this.save('regions',item);
         this.changed();
         await new Promise(resolve=>setTimeout(resolve,0));

@@ -1,4 +1,5 @@
 import * as THREE from './vendor/three.module.js';
+import { TerrainProjection } from './terrain-projection.js';
 
 export const BLOCKS = [
   { id: 1, name: 'Grass', color: '#80a153' },
@@ -175,15 +176,6 @@ function ladder(b,u,v,lo,hi,w=.85) {
   b.part(u+w/2,(hi+lo)/2,v,.12,hi-lo,.14,coal);
   for(let y=lo+.24;y<hi;y+=.67) b.part(u,y,v,w,.10,.14,silver);
 }
-function stack(b,u,v,height,cap,tint) {
-  const base=3;
-  cylinder(b,u,v,base,5,2.1,STONE,0xb5b8a9);
-  cylinder(b,u,v,base+5,height-5,1.15,STEEL,tint,j=>j>height-9?cap:(j%8===0?blend(tint,iron,.21):null));
-  b.part(u+.5,base+height-.3,v+.5,3.20,.45,3.20,cap);
-  b.part(u+.5,base+height+.1,v+.5,1.55,.25,1.55,coal);
-  ladder(b,u+.5,v-1.09,base+2,base+height-.2,.64);
-  for(let y=base+7;y<height;y+=7) b.part(u+.5,y,v+.5,2.65,.15,2.65,lightSteel);
-}
 function vessel(b,u,v,height,rad,base=3,col=silver) {
   cylinder(b,u,v,base,height,rad,STEEL,col,j=> j===1 || j===height-2 ? blend(col,iron,.26):null);
   cylinder(b,u,v,base+height,1,Math.max(.4,rad-.8),STEEL,blend(col,0xd6d7bd,.42));
@@ -202,105 +194,6 @@ function building(b,u,v,w,d,h,col,base=3) {
   }
   b.part((u0+u1+1)/2,base+h+.12,(v0+v1+1)/2,w+.48,.24,d+.48,iron);
 }
-function tankCar(b,u,v,seed,alternate=false) {
-  const white=alternate?0xd2cbb0:0xe5e4d4, band=alternate?0xb77947:0xc87543;
-  const co=1/Math.hypot(1,TRACK_SLOPE), si=TRACK_SLOPE*co;
-  const at=(a,z)=>[u+.5+a*co-z*si,v+.5+a*si+z*co];
-  const beam=(a,y,z,a2,y2,z2,thick,color)=>{
-    const [u0,v0]=at(a,z),[u1,v1]=at(a2,z2); b.beam(u0,y,v0,u1,y2,v1,thick,color);
-  };
-  for(let x=-8;x<=8;x++) for(let z=-6;z<=6;z++) {
-    const along=x*co+z*si, cross=-x*si+z*co;
-    for(let y=4;y<=9;y++) {
-      let mask=0;
-      for(let zbit=0;zbit<2;zbit++) for(let ybit=0;ybit<2;ybit++) for(let xbit=0;xbit<2;xbit++) {
-        const xx=x+xbit*.5-.25, zz=z+zbit*.5-.25;
-        const a=xx*co+zz*si, c=-xx*si+zz*co, cap=Math.max(0,Math.abs(a)-4.66);
-        if(c*c/5.85+((y+ybit*.5+.25-6.99)**2)/6.63+cap*cap/7.95<=1)
-          mask|=1<<(xbit+2*ybit+4*zbit);
-      }
-      if(!mask) continue;
-      let tint=y===5?band:white;
-      if(y===4) tint=blend(white,0x877f6d,.43);
-      if(hash(x,z,seed+y)<.07 && y!==5) tint=blend(tint,0x977f62,.17);
-      b.roundedCell(u+x,y,v+z,tint,mask|(y===5?256:0));
-    }
-    if(Math.abs(along)<7 && Math.abs(cross)<.9) b.cell(u+x,3,v+z,STEEL,coal);
-    if(Math.abs(Math.abs(along)-4.5)<.98 && Math.abs(Math.abs(cross)-1.16)<.60) b.cell(u+x,3,v+z,STEEL,coal);
-  }
-  beam(-8.1,4.13,0,8.1,4.13,0,.45,coal);
-  for(const k of [-5.25,-3.8,3.8,5.25]) for(const side of [-1,1]) {
-    const [x,z]=at(k,side*1.38); b.part(x,3.66,z,.96,.87,.53,coal);
-    const [xx,zz]=at(k,side*1.74); b.part(xx,3.68,zz,.42,.44,.19,iron);
-  }
-  for(const k of [-4.6,.6,4.6]) {
-    const outline=[[-2.52,6.06],[-2.52,7.6],[-1.7,8.67],[-.86,9.13],[.86,9.13],[1.7,8.67],[2.52,7.6]];
-    for(let i=1;i<outline.length;i++) beam(k,outline[i-1][1],outline[i-1][0],k,outline[i][1],outline[i][0],.105,0xb1b19f);
-  }
-  beam(-3.4,9.13,0,3.4,9.13,0,.29,iron);
-  b.part(u+.5,9.58,v+.5,1.36,.40,1.36,iron);
-  b.part(u+.5,9.86,v+.5,.98,.20,.98,lightSteel);
-  for(const a of [-.49,.49]) beam(a,4.25,-2.37,a,9.25,-2.37,.12,coal);
-  for(let y=4.55;y<9.3;y+=.60) beam(-.49,y,-2.37,.49,y,-2.37,.10,lightSteel);
-  for(const a of [-4.5,3.6]) {
-    beam(a,6.66,-2.55,a+1.1,6.66,-2.55,.25,0x516d76);
-    beam(a+1.3,6.67,-2.55,a+1.62,6.67,-2.55,.20,0x7c8d8b);
-  }
-}
-function pipeRack(b,u0,u1,v,y,depth=3) {
-  for(let u=u0;u<=u1;u+=7) {
-    for(const z of [-depth/2,depth/2])
-      b.part(u,3+(y-3)/2,v+z,.42,y-3,.42,iron);
-    b.part(u,y-.48,v,.5,.38,depth+.9,lightSteel);
-  }
-  for(let j=0;j<4;j++) b.part((u0+u1)/2,y+.14+(j%2)*.21,v-depth*.42+j*depth*.28,u1-u0,.42,.48,j===2?0xb2926b:silver);
-}
-function refinery(b,starter) {
-  const p=b.p, seed=p.seed|0;
-  const gradient=blend(0xb8bdac,sampleColor(p,pixel(p,.55,.44)),starter?.21:.47);
-  const scaleH=starter?1:.77+(p.detail||.5)*.56;
-  for(const track of [24,34]) {
-    for(let x=-67;x<=67;x++) {
-      const v=Math.round(track+x*TRACK_SLOPE);
-      for(let dz=-2;dz<=2;dz++) b.cell(x,2,v+dz,STONE,varied(0x929381,.86+.22*hash(x,dz,track)));
-      const axis=track+x*TRACK_SLOPE+.5;
-      if(x%2===0) b.beam(x+1.18,3.09,axis-1.91,x-.20,3.09,axis+1.91,.31,0x6f5d49);
-      for(let j=0;j<3;j++) {
-        const z=axis+(hash(x,j,track)-.5)*4.75;
-        b.part(x+hash(x,j+7,track),3.07,z,.19,.12,.15,j===0?0xb1b3a0:0x797d6c);
-      }
-    }
-    for(const side of [-1,1]) b.beam(-66.5,3.28,track-67*TRACK_SLOPE+.5+side*1.30,67.5,3.28,track+67*TRACK_SLOPE+.5+side*1.30,.19,iron);
-  }
-  for(const [u,track,alt] of [[-48,24,0],[-23,24,1],[5,24,0],[31,24,1],[54,24,0],[-45,34,1],[-23,34,0],[21,34,0],[45,34,0]])
-    tankCar(b,u,Math.round(track+u*TRACK_SLOPE),seed+u,alt);
-  // The source's two pale stacks and the large banded cracking column.
-  stack(b,-8,66,Math.round(36*scaleH),0x707c70,gradient);
-  stack(b,-3,68,Math.round(35*scaleH),0x758276,blend(gradient,0xc2c2ac,.3));
-  frame(b,-6.3,64,3,10.2,6,12,3);
-  vessel(b,20,55,Math.round(25*scaleH),2.05,3,blend(gradient,0xc0bca4,.44));
-  frame(b,20.4,55.4,3,6.4,6.2,Math.round(25*scaleH),5);
-  cylinder(b,20,55,Math.round(25*scaleH)+2,2,2.23,CLAY,0xa67654);
-  ladder(b,24,52.4,3,Math.round(25*scaleH)+5,1);
-  b.part(21.4,Math.round(25*scaleH)+5.1,55.5,7.1,.25,7.2,iron);
-  for(const [u,v,h,r] of [[-39,57,13,1.7],[-31,70,19,1.2],[-22,56,15,1.5],[-15,67,19,1.1],[4,64,14,1.6],[9,61,12,1.2],[30,72,15,1.3],[45,72,15,1.5],[55,64,11,2.1],[-50,73,17,1.2]]) {
-    vessel(b,u,v,Math.round(h*scaleH),r,3,gradient);
-    if(Math.abs(u)%3!==0) frame(b,u+.3,v+.2,3,r*2+1.8,r*2+1.7,Math.round(h*scaleH)-1,3);
-  }
-  for(const [u,v,r,h] of [[-27,47,3.9,7],[-16,47,2.8,8],[0,50,4.1,7],[6,48,2.6,7],[35,52,4.7,7],[47,52,4.1,8],[-45,49,4.6,6]]) vessel(b,u,v,h,r,3,blend(gradient,silver,.45));
-  for(const [u,v,w,d,h,c] of [[10,44,13,7,5,0xc6c6af],[-38,63,14,10,5,0xa3ad9e],[35,68,18,8,7,0xacaf98],[2,77,11,9,8,0xc4c0a4],[-55,49,14,8,4,0xa8b3aa]]) building(b,u,v,w,d,h,c);
-  frame(b,-15,54,3,12,6,8,2);
-  frame(b,31,61,3,13,8,12,3);
-  pipeRack(b,-53,46,40.5,6.7,2.6);
-  pipeRack(b,-44,42,58,12.2,3.5);
-  pipeRack(b,-23,24,51.7,8.3,2.6);
-  for(let u=-48;u<=46;u+=9) {
-    const hi=8+hash(u,0,seed)*8, v=46+hash(u,7,seed)*12;
-    b.part(u,3+(hi-3)/2,v,.55,hi-3,.55,silver);
-    b.part(u+1.5,hi,v,3.5,.56,.56,silver);
-  }
-}
-
 function prepareProjection(r) {
   const p=r.p, aspect=p.width/p.height || p.gridW/p.gridH;
   r.aspect=aspect;
@@ -528,21 +421,10 @@ function terrain(r,u,v) {
   const photo=sampleColor(p,i), depth=p.depth[i]||0;
   let h, col, id;
   if(p.kind==='industrial') {
-    const acrossTrack=v-u*TRACK_SLOPE;
-    const approach=clamp(1-Math.max(0,acrossTrack-.8)/16.2);
-    const back=smooth(80,113,v), side=smooth(55,76,Math.abs(u));
-    h=3+approach*(9.12+(f-.5)*1.2)+back*(2+f*8)+side*(1+4*f);
-    if(Math.abs(v)<1.4 && Math.abs(u)<2.1) h=12.25;
-    if(acrossTrack>17.5 && v<80 && Math.abs(u)<64) h=3;
-    const ballast=Math.min(Math.abs(acrossTrack-24),Math.abs(acrossTrack-34));
-    const yard=v>44+3*f && v<81 && Math.abs(u)<49;
-    const road=Math.abs(u-(-4+.34*v))<.83+fine*.66 && acrossTrack<22;
-    if(ballast<2.85 || yard || road) {
-      id=STONE; col=blend(yard?0xabac96:road?0xaeaa8b:0x979886,photo,.12);
-    } else {
-      id=GRASS; col=blend(0x638444,0xa0b568,f*.71+fine*.23);
-      col=blend(col,photo,.13);
-    }
+    // A level access yard under the observed machinery, rising at its edges.
+    const rim=smooth(42,83,Math.abs(u))+smooth(63,115,v);
+    h=4+f*1.6+rim*(2+depth*5);
+    col=blend(photo,0x888a80,.26);id=surfaceId(col);
   } else {
     const detailed=p.kind==='landscape'||p.kind==='woodland';
     const center=1-smooth(5,18,Math.abs(u));
@@ -641,6 +523,7 @@ export class VoxelWorld {
     this.viewChunks=new Map(); this.viewAtlas=null;
     this.atlas=makeAtlas();
     this.surfaceMaterial=new THREE.MeshLambertMaterial({map:this.atlas,vertexColors:true});
+    this.terrainProjection=new TerrainProjection(this.surfaceMaterial);
     this.trimMaterial=new THREE.MeshLambertMaterial({color:0xffffff});
     this.unitBox=new THREE.BoxGeometry(1,1,1);
     this.dirty=new Set(); this.queue=[]; this.lastChunk=''; this.lastSampleKey=''; this.lastSample=null;
@@ -699,7 +582,7 @@ export class VoxelWorld {
     }
     this.lastSampleKey=''; this.lastSample=null;
     const b=new Builder(r);
-    if(profile.kind==='industrial') { if(first) refinery(b,true); else industrialExtension(this,b); }
+    if(profile.kind==='industrial') industrialExtension(this,b);
     if(profile.kind==='urban') city(this,b);
     if(!first) photoVolume(this,b);
     if(profile.kind==='woodland' || profile.kind==='landscape' || first) woodland(this,b,first);
@@ -944,8 +827,13 @@ export class VoxelWorld {
     if(previous) this.dropMesh(k,previous);
     const columns=new Array(18*18);
     for(let z=-1;z<=16;z++) for(let x=-1;x<=16;x++) columns[(z+1)*18+x+1]=this.column(x0+x,z0+z);
-    const positions=[],normals=[],colors=[],uvs=[],indices=[];
+    const positions=[],normals=[],colors=[],uvs=[],indices=[],editedRanges=[];
     const stamped=this.viewChunks.has(k);
+    const hasEdits=columns.some(col=>col.edits);
+    const protectFace=(start,x,y,z,nx,ny,nz)=>{
+      const own=columns[(z+1)*18+x+1],neighbor=columns[(nz+1)*18+nx+1];
+      if(own.edits?.has(y) || neighbor.edits?.get(ny)===0)editedRanges.push(start,start+4);
+    };
     const read=(x,y,z)=>{
       const col=columns[(z+1)*18+x+1]||stub;
       if(!stamped)return readCol(col,y);
@@ -975,6 +863,7 @@ export class VoxelWorld {
             normals.push(...n); colors.push(rr,gg,bb);
             uvs.push((tile+((i===1||i===2)?.97:.03))/8,i>1?.97:.03);
           }
+          if(hasEdits)protectFace(start,x,y,z,(2*x+ix+n[0])>>1,(2*y+iy+n[1])>>1,(2*z+iz+n[2])>>1);
           indices.push(start,start+1,start+2,start,start+2,start+3);
         }
       }
@@ -1006,6 +895,7 @@ export class VoxelWorld {
           colors.push(red*mult,green*mult,blue*mult);
           uvs.push((tile+((i===1||i===2)?.97:.03))/8,i>1?.97:.03);
         }
+        if(hasEdits)protectFace(start,x,y,z,x+n[0],y+n[1],z+n[2]);
         indices.push(start,start+1,start+2,start,start+2,start+3);
       }
     };
@@ -1024,6 +914,9 @@ export class VoxelWorld {
     const group=new THREE.Group(); group.name='Chunk '+k;
     if(indices.length) {
       const geom=new THREE.BufferGeometry();
+      const editMask=new Uint8Array(positions.length/3);
+      for(let i=0;i<editedRanges.length;i+=2)editMask.fill(1,editedRanges[i],editedRanges[i+1]);
+      geom.setAttribute('terrainEdit',new THREE.BufferAttribute(editMask,1));
       geom.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
       geom.setAttribute('normal',new THREE.Float32BufferAttribute(normals,3));
       geom.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));

@@ -1,31 +1,41 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-screen="menu">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#121511">
-<meta name="description" content="Build and explore a continuous voxel and Gaussian splat world from your own photographs.">
-<title>Strata — Photo worlds</title>
-<link rel="icon" type="image/svg+xml" href="./assets/strata.svg">
-<link rel="stylesheet" href="./studio.css?v=3.6">
+<meta name="theme-color" content="#141523">
+<meta name="description" content="Build and explore a continuous voxel and Gaussian splat world from your own photos and videos.">
+<title>Strata — Photo &amp; Film Arcade</title>
+<link rel="icon" type="image/png" href="./assets/arcade/visitor.png">
+<script>
+  const route = new URLSearchParams(location.search);
+  const root = document.documentElement;
+  if (route.has('demo') || route.get('world') === 'mine') root.dataset.screen = 'game';
+  const platform = route.get('demo');
+  root.dataset.platform = platform === 'phone' || platform === 'computer' ? platform : (matchMedia('(pointer:coarse)').matches ? 'phone' : 'computer');
+</script>
+<link rel="stylesheet" href="./studio.css?v=3.7">
+<link rel="stylesheet" href="./arcade.css?v=4.0">
 <script type="importmap">
 {
   "imports": {
-    "./game.js": "./game.js?v=3.6",
-    "./touch-pad.js": "./touch-pad.js?v=3.6",
-    "./world.js": "./world.js?v=3.5",
-    "./vision.js": "./vision.js?v=3.5",
+    "./game.js": "./game.js?v=4.0",
+    "./video-field.js": "./video-field.js?v=4.0",
+    "./video-source.js": "./video-source.js?v=4.0",
+    "./touch-pad.js": "./touch-pad.js?v=4.0",
+    "./world.js": "./world.js?v=4.0",
+    "./vision.js": "./vision.js?v=4.0",
     "./morph.js": "./morph.js?v=3.5",
     "./reconstruction.js": "./reconstruction.js?v=3.5",
-    "./interface.js": "./interface.js?v=3.5",
+    "./interface.js": "./interface.js?v=4.0",
     "./placements.js": "./placements.js?v=3.5",
-    "./view-volume.js": "./view-volume.js?v=3.5",
+    "./view-volume.js": "./view-volume.js?v=4.0",
     "./photo-fusion.js": "./photo-fusion.js?v=3.5",
     "./stamp-clip.js": "./stamp-clip.js?v=3.5",
-    "./photo-assets.js": "./photo-assets.js?v=3.5",
-    "./walk-route.js": "./walk-route.js?v=3.5",
-    "./photo-bank.js": "./photo-bank.js?v=3.5",
-    "./performance-profile.js": "./performance-profile.js?v=3.5",
+    "./photo-assets.js": "./photo-assets.js?v=4.0",
+    "./walk-route.js": "./walk-route.js?v=4.0",
+    "./photo-bank.js": "./photo-bank.js?v=4.0",
+    "./performance-profile.js": "./performance-profile.js?v=4.0",
     "./photo-motion.js": "./photo-motion.js?v=3.5",
     "./fusion-task.js": "./fusion-task.js?v=3.5",
     "./bank-preview.js": "./bank-preview.js?v=3.5"
@@ -34,34 +44,52 @@
 </script>
 </head>
 <body>
+<section id="arcade-menu" aria-labelledby="arcade-title">
+  <div class="arcade-shell">
+    <div class="arcade-masthead"><img src="./assets/arcade/visitor.png" width="33" height="30" alt=""><span>Photo &amp; film arcade</span><span class="mast-line" aria-hidden="true"></span><span class="pixel-signal" aria-hidden="true"></span></div>
+    <div class="arcade-hero">
+      <div class="menu-landscape" aria-hidden="true"></div>
+      <div class="arcade-intro"><h1 id="arcade-title">STRATA</h1><p>Walk into a world built from photographs and moving film.</p></div>
+    </div>
+    <div class="mode-heading"><span aria-hidden="true"></span><h2>Choose your controls</h2><span aria-hidden="true"></span></div>
+    <nav class="mode-grid" aria-label="Choose a demo">
+      <a class="mode-card computer-card" href="./?demo=computer"><img src="./assets/arcade/computer.png" width="72" height="63" alt=""><span><strong>Computer demo</strong><small>Keyboard + mouse</small></span><i aria-hidden="true">➜</i></a>
+      <a class="mode-card phone-card" href="./?demo=phone"><img src="./assets/arcade/phone.png" width="72" height="63" alt=""><span><strong>Phone demo</strong><small>Touch controls</small></span><i aria-hidden="true">➜</i></a>
+    </nav>
+    <div class="local-link"><a href="./?world=mine">Play with my own photos &amp; videos <span aria-hidden="true">↗</span></a></div>
+  </div>
+</section>
 <header class="topbar">
-  <a class="brand" href="./" aria-label="Strata home"><img src="./assets/strata.svg" alt=""><span>STRATA</span></a>
-  <span class="brand-caption">World engine</span>
-  <nav aria-label="Workspace"><button id="view-world" class="nav-item active"><i data-icon="cube"></i><span>World view</span></button><button id="view-atlas" class="nav-item"><i data-icon="layers"></i><span>Photo atlas</span></button></nav>
-  <div class="top-actions"><a href="./" hidden id="demo-back">My saved world <span aria-hidden="true">↗</span></a><button id="controls" title="Controls" class="quiet"><i data-icon="keyboard"></i><span>Controls</span></button><span class="vline"></span><button id="fullscreen" class="square" aria-label="Enter fullscreen" title="Fullscreen"><i data-icon="expand"></i></button></div>
+  <a class="brand" href="./" aria-label="Strata home"><img src="./assets/arcade/visitor.png" alt=""><span>STRATA</span></a>
+  <span class="brand-caption">Photo &amp; film arcade</span>
+  <nav aria-label="Workspace"><button id="view-world" class="nav-item active"><i data-icon="cube"></i><span>World</span></button><button id="view-atlas" class="nav-item"><i data-icon="layers"></i><span>Placements</span></button></nav>
+  <div class="top-actions"><button id="history-browser" type="button" class="quiet" aria-label="Open historical atlas"><i data-icon="layers"></i><span>Historical atlas</span></button><a href="./?world=mine" hidden id="demo-back">My media <span aria-hidden="true">↗</span></a><button id="controls" title="Controls" class="quiet"><i data-icon="keyboard"></i><span>Controls</span></button><span class="vline"></span><button id="fullscreen" class="square" aria-label="Enter fullscreen" title="Fullscreen"><i data-icon="expand"></i></button></div>
 </header>
 <main>
  <section id="viewport" aria-label="Playable photo world">
   <canvas id="scene" tabindex="0" aria-label="First-person world. Press B to place the next bank photo, or U to choose a photograph."></canvas>
   <div class="scene-tint"></div>
+  <div class="capture-hud">
   <div class="world-heading">
    <div class="region-tag"><span class="live-dot"></span><span id="region-no">CAPTURED VIEW</span></div>
-   <h1 id="world-title">Refinery Yard</h1>
+   <h1 id="world-title">Photo world</h1>
+  </div>
+  <button id="view-mix" aria-label="Inspect photos in this view"><span id="mix-thumbs"></span><span id="view-count">1 photo in view</span><span id="mix-meter" aria-hidden="true"></span></button>
+  <button id="walk-waypoint" hidden title="Walk to this waypoint to place its photo, or select it to jump there"></button>
   </div>
   <div class="compass" aria-label="Compass"><div class="compass-center"></div><div id="compass-tape"></div><span id="bearing">N · 000°</span></div>
   <button id="mobile-inspector" class="hud-button" aria-label="Open world inspector" title="World inspector"><i data-icon="sliders"></i></button>
-  <button id="auto-hud" type="button" role="switch" aria-label="Place photos as I move" aria-checked="false" hidden><span id="auto-mode">Auto off</span><small id="auto-ready"></small></button>
+  <button id="auto-hud" type="button" aria-pressed="false" title="Toggle automatic placement (G)" hidden><span id="auto-mode">Start cycling</span><small id="auto-ready"></small></button>
+  <button id="clip-hud" type="button" hidden>Pause video</button>
   <div class="crosshair" aria-hidden="true"></div>
-  <button id="view-mix" aria-label="Inspect photos in this view"><span id="mix-thumbs"></span><span id="view-count">1 photo in view</span><span id="mix-meter" aria-hidden="true"></span></button>
-  <button id="walk-waypoint" hidden title="Walk to this waypoint to place its photo, or select it to jump there"></button>
   <div class="entry" id="entry"><div class="aim-row"><button id="turn-left" class="aim-turn" aria-label="Turn left 15 degrees" title="Turn left 15°" disabled>↶</button><button id="play" class="play" disabled><i data-icon="play"></i><span>Enter world</span></button><button id="turn-right" class="aim-turn" aria-label="Turn right 15 degrees" title="Turn right 15°" disabled>↷</button></div><button id="bank-entry" type="button" disabled><i data-icon="image"></i>Import &amp; walk</button><span class="entry-hint">Aim with the mouse · B cycles bank photos · U chooses a photo</span></div>
   <div class="inventory" id="inventory" role="toolbar" aria-label="Building materials"></div>
   <div id="current-block"></div>
   <div id="touch-pad" aria-label="Touch movement controls">
    <div class="dpad"><button data-key="KeyW" aria-label="Move forward">▲</button><button data-key="KeyA" aria-label="Move left">◀</button><button data-key="KeyS" aria-label="Move back">▼</button><button data-key="KeyD" aria-label="Move right">▶</button></div>
-   <div class="touch-actions"><button data-key="Space" aria-label="Jump">↑</button><button data-act="mine">Mine</button><button data-act="place">Place</button><button data-act="photo" aria-label="Place a photo in this view">+ Photo</button><button id="bank-touch" data-act="bank" hidden>Next photo</button><button data-act="pause">Pause</button></div>
+   <div class="touch-actions"><button data-key="Space" aria-label="Jump">↑</button><button data-act="mine">Mine</button><button data-act="place">Place</button><button data-act="photo" aria-label="Place a photo in this view">+ Photo</button><button id="bank-touch" data-act="bank" hidden>Place next</button><button data-act="pause">Pause</button></div>
   </div>
-  <div id="load" role="status"><div class="load-card"><img src="./assets/strata.svg" width="36" height="36" alt=""><span id="load-label">Reading the source photograph…</span><div class="load-line"></div></div></div>
+  <div id="load" role="status"><div class="load-card"><img src="./assets/arcade/visitor.png" width="36" height="33" alt=""><span id="load-label">Preparing the world…</span><div class="load-line"></div></div></div>
   <div id="toast" role="status" hidden></div>
   <div id="placement-status" role="status" hidden><span class="placing-dot" aria-hidden="true"></span><span id="placement-label"></span></div>
  </section>
@@ -70,28 +98,34 @@
   <div class="panel-scroll">
    <section class="panel-section source-section">
     <div class="section-title"><h2>Selected source</h2><span class="micro" id="source-index">01 / 01</span></div>
-    <button class="source-image" id="enlarge" aria-label="Inspect source photograph"><img id="thumb" src="./assets/refinery-preview.jpg" alt="Refinery with twin stacks and striped railcars"><span class="image-expand"><i data-icon="expand"></i></span><span class="image-corners"></span></button>
-    <div class="file-row"><i data-icon="image"></i><span class="filename" id="filename">CAM15071.JPG</span><span class="filetype" id="filetype">JPG</span></div>
-    <div class="file-dims" id="dimensions">6000 × 4000 px</div>
+    <button class="source-image" id="enlarge" aria-label="Inspect source photograph"><img id="thumb" alt="Selected source"><span class="image-expand"><i data-icon="expand"></i></span><span class="image-corners"></span></button>
+    <div class="file-row"><i data-icon="image"></i><span class="filename" id="filename">Loading source…</span><span class="filetype" id="filetype">—</span></div>
+    <div class="file-dims" id="dimensions">—</div>
     <div id="view-heading" class="capture-bearing">N 000°</div>
-    <button class="primary" id="add-photo" disabled><i data-icon="plus"></i>Add photo here</button>
+    <button class="primary" id="add-photo" disabled><i data-icon="plus"></i>Place media here</button>
     <div class="view-actions"><button class="sample-path" id="path-action" disabled><i data-icon="route"></i><span>Try overlapping views</span></button><button class="sample-path" id="replay-placement" hidden><i data-icon="play"></i>Replay placement</button></div>
     <a class="sample-path" id="walk-link" href="./?demo=walk"><i data-icon="route"></i>Walk the 11-photo trail</a>
    </section>
    <section class="panel-section">
-    <div class="section-title"><h2>Photo bank</h2><span class="micro" id="bank-count" aria-live="polite">0 ready</span></div>
-    <div class="bank-source"><img id="bank-thumb" alt="" hidden><span id="bank-upcoming">Select several photos to build a walking route.</span></div>
-    <div class="bank-actions"><button id="bank-load" class="sample-path" disabled title="Add multiple photos to the bank"><i data-icon="plus"></i>Load photos</button><button id="bank-next" class="sample-path" disabled>Place next <kbd>B</kbd></button></div>
-    <label class="bank-switch"><span>Place as I move</span><input type="checkbox" role="switch" id="bank-auto" aria-describedby="bank-rule"></label>
-    <p id="bank-rule">Walk 12 blocks or turn 35° to place the next ready photo.</p>
+    <div class="section-title"><h2>Media bank</h2><span class="micro" id="bank-count" aria-live="polite">0 ready</span></div>
+    <div class="bank-source"><img id="bank-thumb" alt="" hidden><span id="bank-upcoming">Select photos and videos together.</span></div>
+    <div class="bank-actions"><button id="bank-load" class="sample-path" disabled title="Add photos and videos together"><i data-icon="plus"></i>Load photos &amp; videos</button><button id="bank-next" class="sample-path" disabled>Place next <kbd>B</kbd></button></div>
+    <label class="bank-switch"><span>Cycle as I move</span><input type="checkbox" role="switch" id="bank-auto" aria-describedby="bank-rule"></label>
+    <p id="bank-rule">Walk 12 blocks or turn 35° to place the next ready item.</p>
+    <a id="film-link" class="inline-link" href="./?demo=video">Explore a moving train film <i data-icon="arrow-ne"></i></a>
     <a id="auto-link" class="inline-link" href="./?demo=autowalk">Try the automatic photo walk <i data-icon="arrow-ne"></i></a>
     <small id="bank-pending" role="status" hidden></small>
    </section>
    <section class="panel-section">
     <div class="section-title"><h2>Scene analysis</h2><i data-icon="scan"></i></div>
-    <div class="data-row"><span>Scene type</span><span id="kind">Industrial</span></div>
+    <div class="data-row"><span>Scene type</span><span id="kind">—</span></div>
     <div class="data-row"><span>Vision layer</span><button id="vision-info" class="inline-link">Inspect <i data-icon="arrow-ne"></i></button></div>
     <div class="palette-label">Source palette</div><div id="palette" title="Colors sampled from the source photograph"></div>
+   </section>
+   <section id="clip-panel" class="panel-section" hidden>
+    <div class="section-title"><h2>Video playback</h2><output id="clip-clock" class="micro"></output></div>
+    <div id="clip-name" class="bank-source"></div><input id="clip-position" type="range" min="0" max="1" step="0.01" value="0" aria-label="Video position in seconds">
+    <button type="button" id="clip-toggle" class="sample-path">Pause video</button>
    </section>
    <section class="panel-section render-section">
     <div class="section-title"><h2>Render layers</h2><i data-icon="layers"></i></div>
@@ -104,9 +138,11 @@
  </aside>
 </main>
 <footer class="statusbar"><div class="status-left"><span class="status-live"><b></b><span id="connection">Initializing</span></span><span class="foot-sep"></span><span class="xyz"><i data-icon="pin"></i><span id="coords">X 0 &nbsp; Y 0 &nbsp; Z 0</span></span></div><div class="status-right"><span id="flight-status">Walk mode</span><span class="foot-sep"></span><span id="fps">— FPS</span><span class="foot-sep"></span><span id="save-status"><i data-icon="drive"></i>Local session</span></div></footer>
-<input type="file" accept="image/*" id="file" hidden>
-<input type="file" accept="image/*" id="bank-files" multiple hidden>
+<input type="file" accept="image/*,video/*,.mov,.mp4,.m4v,.webm,.heic,.heif" id="file" hidden>
+<input type="file" accept="image/*,video/*,.mov,.mp4,.m4v,.webm,.heic,.heif" id="bank-files" multiple hidden>
 <dialog id="modal"><div class="dialog-head"><div><div class="eyebrow" id="modal-kicker">STRATA</div><h2 id="modal-title"></h2></div><button id="close-modal" class="square" aria-label="Close dialog"><i data-icon="x"></i></button></div><div class="dialog-body" id="modal-body"></div></dialog>
-<script type="module" src="./studio.js?v=3.6"></script>
+<script type="module">
+  if (document.documentElement.dataset.screen === 'game') await import('./studio.js?v=4.0');
+</script>
 </body>
 </html>
